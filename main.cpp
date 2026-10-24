@@ -5,6 +5,8 @@
 #include <climits>
 #include <iostream>
 
+#include <FastNoiseLite/Cpp/FastNoiseLite.h>
+
 using namespace std;
 
 #define MAP_WIDTH 100
@@ -12,15 +14,40 @@ using namespace std;
 
 int map[MAP_HEIGHT][MAP_WIDTH];
 int mapBuffer[MAP_HEIGHT][MAP_WIDTH];
+float heightMap[MAP_HEIGHT][MAP_WIDTH];
 // int seed = time(nullptr);
 int seed = 1;
+
+FastNoiseLite noise;
 
 struct Point {
     int y;
     int x;
 };
 
-void displayCave() {
+struct TerrainRegion {
+    Point center;
+    float baseHeight;
+    float noiseStrength;
+    float noiseScale;
+    int terrainSeed;
+
+    TerrainRegion(Point c, float bH, float nSt, float nSc, int tS) {
+        center = c;
+        baseHeight = bH;
+        noiseStrength = nSt;
+        noiseScale = nSc;
+        terrainSeed = tS;
+    }
+};
+
+void setupNoise() {
+    noise.SetNoiseType(FastNoiseLite::NoiseType_Perlin);
+    noise.SetFrequency(0.01f);
+    noise.SetSeed(seed);
+}
+
+void displayMap() {
     for (int y = 0; y < MAP_HEIGHT; y++) {
         for (int x = 0; x < MAP_WIDTH; x++) {
             if (map[y][x] == 1) {
@@ -33,7 +60,23 @@ void displayCave() {
     }
 }
 
-void genCave() {
+void displayHeightMap() {
+    const char* gradient = " .:-=+*#%@";
+    
+    for (int y = 0; y < MAP_HEIGHT; y++) {
+        for (int x = 0; x < MAP_WIDTH; x++) {
+            if (heightMap[y][x] == -1) {
+                cout << 'X';
+            } else {
+                int index = static_cast<int>(heightMap[y][x] * 9);
+                cout << gradient[index];
+            }
+        }
+        cout << endl;
+    }
+}
+
+void genMap() {
     srand(seed);
 
     // Generate initial map
@@ -48,10 +91,18 @@ void genCave() {
             }
         }
     }
+
+    for (int y = 0; y < MAP_HEIGHT; y++) {
+        for (int x = 0; x < MAP_WIDTH; x++) {
+            if (y == 0 || y == (MAP_HEIGHT - 1) || x == 0 || x == (MAP_HEIGHT - 1)) {
+                map[y][x] = 1;
+            }
+        }
+    }
     
 }
 
-int checkSurround(int px, int py, int check=1, int gridSize=3) {
+int checkSurround(int py, int px, int check=1, int gridSize=3) {
     int count = 0;
     int itMod = gridSize -1; // modifier for modifying the iterator
     int startMod = gridSize - itMod; // modifier for modifying the starting coordinates
@@ -108,7 +159,7 @@ void progressGenBoth() {
 }
 
 void caveGenCycle() {
-    genCave();
+    genMap();
     for (int i=1; i<=4; i++) {
         progressGenBoth();
     }
@@ -163,7 +214,9 @@ vector<vector<Point>> findRegions() {
     return regions;
 }
 
-void connectRegions() {
+vector<vector<Point>> connectRegions() {
+    vector<vector<Point>> tunnelPaths; 
+
     while (true) {
         vector<vector<Point>> regions = findRegions();
 
@@ -203,7 +256,9 @@ void connectRegions() {
 
         Point current = start;
         map[current.y][current.x] = 0;
-        
+        vector<Point> tunnelPath;
+        tunnelPath.push_back(start);
+
         while (current.x != target.x || current.y != target.y) {
             bool canMoveX = current.x != target.x;
             bool canMoveY = current.y != target.y;
@@ -231,14 +286,102 @@ void connectRegions() {
             }
 
             map[current.y][current.x] = 0;
+            tunnelPath.push_back(current);
+        }
+        tunnelPaths.push_back(tunnelPath);
+    }
+    return tunnelPaths;
+}
+
+vector<TerrainRegion> genTerrainRegions() {
+    vector<vector<Point>> regions = findRegions();
+    vector<TerrainRegion> terrainRegions;
+    setupNoise();
+
+    for (int i = 0; i < regions.size(); i++) {
+        int totalX = 0;
+        int totalY = 0;
+
+        for (const Point& a : regions[i]) {
+            totalX += a.x;
+            totalY += a.y;
         }
 
+        int avgX = totalX / regions[i].size();
+        int avgY = totalY / regions[i].size();
+
+        float baseHeight = 1.0f - (static_cast<float>(avgY) / (MAP_HEIGHT - 1));
+        terrainRegions.push_back({{avgY, avgX}, baseHeight, 0.05f, 0.04f, seed+i});
     }
+    return terrainRegions;
+}
+
+void genHeightMap() {
+    vector<TerrainRegion> terrainRegions = genTerrainRegions();
+    vector<vector<Point>> regions = findRegions();
+
+    for (int y = 0; y < MAP_HEIGHT; y++) {
+        for (int x = 0; x < MAP_WIDTH; x++) {
+            if (map[y][x] == 1) {
+                heightMap[y][x] = -1;
+                continue;
+            }
+        }
+    }
+
+    for (size_t i = 0; i < regions.size(); i++) {
+        const TerrainRegion& terrain = terrainRegions[i];
+        FastNoiseLite noise;
+
+        noise.SetNoiseType(FastNoiseLite::NoiseType_Perlin);
+        noise.SetFrequency(terrain.noiseScale);
+        noise.SetSeed(terrain.terrainSeed);
+
+        for (const Point& point : regions[i]) {
+            float noiseValue = noise.GetNoise(static_cast<float>(point.x - terrain.center.x), static_cast<float>(point.y - terrain.center.y));
+            float height = terrain.baseHeight + noiseValue * terrain.noiseStrength;
+
+            heightMap[point.y][point.x] = clamp(height, 0.0f, 1.0f);
+        }
+    }
+
+}
+
+void genTunnelHeights(vector<vector<Point>> tunnels) {
+    vector<vector<Point>> tunnelPaths = tunnels;
+    for (vector<Point> tunnelPath : tunnelPaths) {
+        float startHeight = heightMap[tunnelPath[0].y][tunnelPath[0].x];
+        float endHeight = heightMap[tunnelPath[tunnelPath.size() - 1].y][tunnelPath[tunnelPath.size() - 1].x];
+        
+        for (int i = 0; i < tunnelPath.size(); i++) {
+            float t;
+            if ((tunnelPath.size() - 1) == 0) {
+                t = 0.0f;
+            } else {
+                t = static_cast<float>(i) / (tunnelPath.size() - 1);
+            }
+
+            float height = startHeight + t * (endHeight - startHeight);
+
+            heightMap[tunnelPath[i].y][tunnelPath[i].x] = height;
+        }
+    }
+
+}
+
+void genMaps() {
+    caveGenCycle();
+    genHeightMap();
+    vector<vector<Point>> tunnelPaths = connectRegions();
+    genTunnelHeights(tunnelPaths);
+
 }
 
 int main() {
-    caveGenCycle();
-    connectRegions(); 
-    displayCave();
+    genMaps();
+
+    displayMap();
+    cout << "\n\nHeight Map:\n" << endl;
+    displayHeightMap();    
     return 0;
 }
