@@ -9,22 +9,26 @@
 
 using namespace std;
 
+// Defining map dimensions - subject to change later
 #define MAP_WIDTH 100
 #define MAP_HEIGHT 100
 
+// Defining program wide variables namely the seed and different maps
 int map[MAP_HEIGHT][MAP_WIDTH];
 int mapBuffer[MAP_HEIGHT][MAP_WIDTH];
 float heightMap[MAP_HEIGHT][MAP_WIDTH];
-// int seed = time(nullptr);
-int seed = 1;
+int seed = time(nullptr);
 
+// Initializing the noise object
 FastNoiseLite noise;
 
+// Creating the Point struct used in most functions
 struct Point {
     int y;
     int x;
 };
 
+// Creating the TerrainRegion struct used for calculating height of the terrain in each seperate sub-cave
 struct TerrainRegion {
     Point center;
     float baseHeight;
@@ -41,12 +45,14 @@ struct TerrainRegion {
     }
 };
 
+// Function for setting up noise
 void setupNoise() {
     noise.SetNoiseType(FastNoiseLite::NoiseType_Perlin);
     noise.SetFrequency(0.01f);
     noise.SetSeed(seed);
 }
 
+// Function to display the normal cave map
 void displayMap() {
     for (int y = 0; y < MAP_HEIGHT; y++) {
         for (int x = 0; x < MAP_WIDTH; x++) {
@@ -60,6 +66,7 @@ void displayMap() {
     }
 }
 
+// Function to display the height map with a gradient for different height levels
 void displayHeightMap() {
     const char* gradient = " .:-=+*#%@";
     
@@ -76,6 +83,7 @@ void displayHeightMap() {
     }
 }
 
+// Generates an initial map by using a random number to place a wall or a floor at different places
 void genMap() {
     srand(seed);
 
@@ -92,6 +100,7 @@ void genMap() {
         }
     }
 
+    // Makes sure edges are all walls
     for (int y = 0; y < MAP_HEIGHT; y++) {
         for (int x = 0; x < MAP_WIDTH; x++) {
             if (y == 0 || y == (MAP_HEIGHT - 1) || x == 0 || x == (MAP_HEIGHT - 1)) {
@@ -102,6 +111,7 @@ void genMap() {
     
 }
 
+// Checks the surround points around a central point and counts the occurences of the check point
 int checkSurround(int py, int px, int check=1, int gridSize=3) {
     int count = 0;
     int itMod = gridSize -1; // modifier for modifying the iterator
@@ -122,6 +132,7 @@ int checkSurround(int py, int px, int check=1, int gridSize=3) {
     return count;
 }
 
+// Progresses the generation by only checking the walls
 void progressGenWall() {
     for (int y = 0; y < MAP_HEIGHT; y++) {
         for (int x = 0; x < MAP_WIDTH; x++) {
@@ -140,6 +151,7 @@ void progressGenWall() {
     }
 }
 
+// Progresses the generation by checking both the walls and floor tiles
 void progressGenBoth() {
     for (int y = 0; y < MAP_HEIGHT; y++) {
         for (int x = 0; x < MAP_WIDTH; x++) {
@@ -158,6 +170,7 @@ void progressGenBoth() {
     }
 }
 
+// The cellular automata process
 void caveGenCycle() {
     genMap();
     for (int i=1; i<=4; i++) {
@@ -168,6 +181,7 @@ void caveGenCycle() {
     }
 }
 
+// Finds all the regions in the initial map using flood fill
 vector<vector<Point>> findRegions() {
     bool visited[MAP_HEIGHT][MAP_WIDTH] = {};
     vector<vector<Point>> regions;
@@ -214,6 +228,7 @@ vector<vector<Point>> findRegions() {
     return regions;
 }
 
+// Connects each region to the biggest region using the smallest path, all paths are stored in a vector for later use
 vector<vector<Point>> connectRegions() {
     vector<vector<Point>> tunnelPaths; 
 
@@ -226,6 +241,7 @@ vector<vector<Point>> connectRegions() {
 
         int largest = 0;
 
+        // Finds largest region
         for (int i = 1; i < regions.size(); i++) {
             if (regions[i].size() > regions[largest].size()) {
                 largest = i;
@@ -236,6 +252,7 @@ vector<vector<Point>> connectRegions() {
         Point start = {};
         Point target = {};
 
+        // Loops through each point in a region searching for the smallest distance between points of the two regions
         for (int i = 0; i < regions.size(); i++) {
             if (i == largest) {
                 continue;
@@ -259,6 +276,7 @@ vector<vector<Point>> connectRegions() {
         vector<Point> tunnelPath;
         tunnelPath.push_back(start);
 
+        // Makes the tunnel path
         while (current.x != target.x || current.y != target.y) {
             bool canMoveX = current.x != target.x;
             bool canMoveY = current.y != target.y;
@@ -293,6 +311,7 @@ vector<vector<Point>> connectRegions() {
     return tunnelPaths;
 }
 
+// Generates the terrain region structs for each region
 vector<TerrainRegion> genTerrainRegions() {
     vector<vector<Point>> regions = findRegions();
     vector<TerrainRegion> terrainRegions;
@@ -316,6 +335,7 @@ vector<TerrainRegion> genTerrainRegions() {
     return terrainRegions;
 }
 
+// Generates an initial height map for all seperate regions going from high to low using perlin noise
 void genHeightMap() {
     vector<TerrainRegion> terrainRegions = genTerrainRegions();
     vector<vector<Point>> regions = findRegions();
@@ -347,6 +367,7 @@ void genHeightMap() {
 
 }
 
+// Generates the hights for the created tunnel paths using a gradient going from high to low
 void genTunnelHeights(vector<vector<Point>> tunnels) {
     vector<vector<Point>> tunnelPaths = tunnels;
     for (vector<Point> tunnelPath : tunnelPaths) {
@@ -369,6 +390,7 @@ void genTunnelHeights(vector<vector<Point>> tunnels) {
 
 }
 
+// Calls all functions in the correct order
 void genMaps() {
     caveGenCycle();
     genHeightMap();
