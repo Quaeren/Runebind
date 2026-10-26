@@ -398,12 +398,3 @@ void genMaps() {
     genTunnelHeights(tunnelPaths);
 
 }
-
-int main() {
-    genMaps();
-
-    displayMap();
-    cout << "\n\nHeight Map:\n" << endl;
-    displayHeightMap();    
-    return 0;
-}
