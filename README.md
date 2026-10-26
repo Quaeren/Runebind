@@ -5,10 +5,11 @@ To try out the cave generation for yourself download the repo and run the CaveGe
 ## Testing Cave Generation
 1. Go to releases and download the file named CaveGeneration
 2. Run the file in the command line
-   **Linux/MacOS**
+   **Linux/MacOS** - You should be able to do the same on Windows
    ```Bash
    chmod +x /path/to/CaveGeneration
    ./CaveGeneration
    ```
+   
    
    
