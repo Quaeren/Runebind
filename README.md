@@ -12,7 +12,8 @@ To try out the cave generation for yourself download the repo and run the CaveGe
    ```
 ## Testing The Voxel Engine
 1. Download the files in this repo, make sure you have all the needed libraries (glm, glew and opengl) in your include folder
-2. Build the project
+2. Unzip the file and go into the folder
+3. Build the project
    **Linux/MacOS** - You should be able to do the same on Windows
    ```Bash
    g++ -g -std=c++17 graphics.cpp -o graphics -lGLEW -lglfw -lGL
