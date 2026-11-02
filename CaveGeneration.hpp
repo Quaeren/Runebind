@@ -1,9 +1,13 @@
+#ifndef CAVEGENERATION_HPP
+#define CAVEGENERATION_HPP
+
 #include <cstdlib>
 #include <vector>
 #include <queue>
 #include <algorithm>
 #include <climits>
 #include <iostream>
+#include <array>
 
 #include <FastNoiseLite/Cpp/FastNoiseLite.h>
 
@@ -14,9 +18,13 @@ using namespace std;
 #define MAP_HEIGHT 100
 
 // Defining program wide variables namely the seed and different maps
-int map[MAP_HEIGHT][MAP_WIDTH];
-int mapBuffer[MAP_HEIGHT][MAP_WIDTH];
-float heightMap[MAP_HEIGHT][MAP_WIDTH];
+
+using Map = array<array<int, MAP_HEIGHT>, MAP_WIDTH>;
+using HeightMap = array<array<float, MAP_HEIGHT>, MAP_WIDTH>;
+
+Map map{};
+int mapBuffer[MAP_WIDTH][MAP_HEIGHT];
+HeightMap heightMap{};
 int seed = time(nullptr);
 
 // Initializing the noise object
@@ -24,8 +32,8 @@ FastNoiseLite noise;
 
 // Creating the Point struct used in most functions
 struct Point {
-    int y;
     int x;
+    int y;
 };
 
 // Creating the TerrainRegion struct used for calculating height of the terrain in each seperate sub-cave
@@ -54,9 +62,9 @@ void setupNoise() {
 
 // Function to display the normal cave map
 void displayMap() {
-    for (int y = 0; y < MAP_HEIGHT; y++) {
-        for (int x = 0; x < MAP_WIDTH; x++) {
-            if (map[y][x] == 1) {
+    for (int x = 0; x < MAP_HEIGHT; x++) {
+        for (int y = 0; y < MAP_WIDTH; y++) {
+            if (map[x][y] == 1) {
                 cout << "#";
             } else {
                 cout << ".";
@@ -70,12 +78,12 @@ void displayMap() {
 void displayHeightMap() {
     const char* gradient = " .:-=+*#%@";
     
-    for (int y = 0; y < MAP_HEIGHT; y++) {
-        for (int x = 0; x < MAP_WIDTH; x++) {
-            if (heightMap[y][x] == -1) {
+    for (int x = 0; x < MAP_HEIGHT; x++) {
+        for (int y = 0; y < MAP_WIDTH; y++) {
+            if (heightMap[x][y] == -1) {
                 cout << 'X';
             } else {
-                int index = static_cast<int>(heightMap[y][x] * 9);
+                int index = static_cast<int>(heightMap[x][y] * 9);
                 cout << gradient[index];
             }
         }
@@ -88,28 +96,30 @@ void genMap() {
     srand(seed);
 
     // Generate initial map
-    for (int y = 0; y < MAP_HEIGHT; y++) {
-        for (int x = 0; x < MAP_WIDTH; x++) {
+    for (int x = 0; x < MAP_WIDTH; x++) {
+        for (int y = 0; y < MAP_HEIGHT; y++) {
             if ((rand() % 101) < 49) {
-                map[y][x] = 1;
-                mapBuffer[y][x] = 1;
+                map[x][y] = 1;
+                mapBuffer[x][y] = 1;
             } else {
-                map[y][x] = 0;
-                mapBuffer[y][x] = 0;
+                map[x][y] = 0;
+                mapBuffer[x][y] = 0;
             }
         }
     }
 
     // Makes sure edges are all walls
-    for (int y = 0; y < MAP_HEIGHT; y++) {
-        for (int x = 0; x < MAP_WIDTH; x++) {
-            if (y == 0 || y == (MAP_HEIGHT - 1) || x == 0 || x == (MAP_HEIGHT - 1)) {
-                map[y][x] = 1;
+    for (int x = 0; x < MAP_WIDTH; x++) {
+        for (int y = 0; y < MAP_HEIGHT; y++) {
+            if (y == 0 || y == MAP_HEIGHT - 1 ||
+                x == 0 || x == MAP_WIDTH - 1) {
+                map[x][y] = 1;
+                mapBuffer[x][y] = 1;
             }
         }
     }
-    
 }
+
 
 // Checks the surround points around a central point and counts the occurences of the check point
 int checkSurround(int py, int px, int check=1, int gridSize=3) {
@@ -121,7 +131,7 @@ int checkSurround(int py, int px, int check=1, int gridSize=3) {
         for (int x = px-startMod; x < px+itMod; x++) {
             if (!(y == py && x == px)) {
                 if (y >= 0 && y < MAP_HEIGHT && x >= 0 && x < MAP_WIDTH) {
-                    if (map[y][x] == check) {
+                    if (map[x][y] == check) {
                         count++;
                     }
                 }
@@ -134,38 +144,38 @@ int checkSurround(int py, int px, int check=1, int gridSize=3) {
 
 // Progresses the generation by only checking the walls
 void progressGenWall() {
-    for (int y = 0; y < MAP_HEIGHT; y++) {
-        for (int x = 0; x < MAP_WIDTH; x++) {
+    for (int x = 0; x < MAP_HEIGHT; x++) {
+        for (int y = 0; y < MAP_WIDTH; y++) {
             if (checkSurround(y, x) >= 5) {
-                mapBuffer[y][x] = 1;
+                mapBuffer[x][y] = 1;
             } else if (checkSurround(y, x) < 4) {
-                mapBuffer[y][x] = 0;
+                mapBuffer[x][y] = 0;
             }
         }
     }
 
-    for (int y = 0; y < MAP_HEIGHT; y++) {
-        for (int x = 0; x < MAP_WIDTH; x++) {
-            map[y][x] = mapBuffer[y][x];
+    for (int x = 0; x < MAP_WIDTH; x++) {
+        for (int y = 0; y < MAP_HEIGHT; y++) {
+            map[x][y] = mapBuffer[x][y];
         }
     }
 }
 
 // Progresses the generation by checking both the walls and floor tiles
 void progressGenBoth() {
-    for (int y = 0; y < MAP_HEIGHT; y++) {
-        for (int x = 0; x < MAP_WIDTH; x++) {
+    for (int x = 0; x < MAP_WIDTH; x++) {
+        for (int y = 0; y < MAP_HEIGHT; y++) {
             if (checkSurround(y, x) >= 5 || checkSurround(y, x, 0) <= 3) {
-                mapBuffer[y][x] = 1;
+                mapBuffer[x][y] = 1;
             } else if (checkSurround(y, x) < 4) {
-                mapBuffer[y][x] = 0;
+                mapBuffer[x][y] = 0;
             }
         }
     }
 
-    for (int y = 0; y < MAP_HEIGHT; y++) {
-        for (int x = 0; x < MAP_WIDTH; x++) {
-            map[y][x] = mapBuffer[y][x];
+    for (int x = 0; x < MAP_WIDTH; x++) {
+        for (int y = 0; y < MAP_HEIGHT; y++) {
+            map[x][y] = mapBuffer[x][y];
         }
     }
 }
@@ -183,24 +193,24 @@ void caveGenCycle() {
 
 // Finds all the regions in the initial map using flood fill
 vector<vector<Point>> findRegions() {
-    bool visited[MAP_HEIGHT][MAP_WIDTH] = {};
+    bool visited[MAP_WIDTH][MAP_HEIGHT] = {};
     vector<vector<Point>> regions;
 
     int dy[] = {-1, 1, 0, 0};
     int dx[] = {0, 0, -1, 1};
 
-    for (int y = 0; y < MAP_HEIGHT; y++) {
-        for (int x = 0; x < MAP_WIDTH; x++) {
+    for (int x = 0; x < MAP_WIDTH; x++) {
+        for (int y = 0; y < MAP_HEIGHT; y++) {
 
-            if (map[y][x] == 1 || visited[y][x]) {
+            if (map[x][y] == 1 || visited[x][y]) {
                 continue;
             }
 
             vector<Point> region;
             queue<Point> pending;
 
-            pending.push({y, x});
-            visited[y][x] = true;
+            pending.push({x, y});
+            visited[x][y] = true;
 
             while (!pending.empty()) {
                 Point current = pending.front();
@@ -216,9 +226,9 @@ vector<vector<Point>> findRegions() {
                         continue;
                     } 
 
-                    if (map[ny][nx] == 0 && !visited[ny][nx]) {
-                        visited[ny][nx] = true;
-                        pending.push({ny, nx});
+                    if (map[nx][ny] == 0 && !visited[nx][ny]) {
+                        visited[nx][ny] = true;
+                        pending.push({nx, ny});
                     }
                 }
             }
@@ -272,7 +282,7 @@ vector<vector<Point>> connectRegions() {
         }
 
         Point current = start;
-        map[current.y][current.x] = 0;
+        map[current.x][current.y] = 0;
         vector<Point> tunnelPath;
         tunnelPath.push_back(start);
 
@@ -303,7 +313,7 @@ vector<vector<Point>> connectRegions() {
                 }
             }
 
-            map[current.y][current.x] = 0;
+            map[current.x][current.y] = 0;
             tunnelPath.push_back(current);
         }
         tunnelPaths.push_back(tunnelPath);
@@ -340,10 +350,10 @@ void genHeightMap() {
     vector<TerrainRegion> terrainRegions = genTerrainRegions();
     vector<vector<Point>> regions = findRegions();
 
-    for (int y = 0; y < MAP_HEIGHT; y++) {
-        for (int x = 0; x < MAP_WIDTH; x++) {
-            if (map[y][x] == 1) {
-                heightMap[y][x] = -1;
+    for (int x = 0; x < MAP_WIDTH; x++) {
+        for (int y = 0; y < MAP_HEIGHT; y++) {
+            if (map[x][y] == 1) {
+                heightMap[x][y] = -1;
                 continue;
             }
         }
@@ -361,7 +371,7 @@ void genHeightMap() {
             float noiseValue = noise.GetNoise(static_cast<float>(point.x - terrain.center.x), static_cast<float>(point.y - terrain.center.y));
             float height = terrain.baseHeight + noiseValue * terrain.noiseStrength;
 
-            heightMap[point.y][point.x] = clamp(height, 0.0f, 1.0f);
+            heightMap[point.x][point.y] = clamp(height, 0.0f, 1.0f);
         }
     }
 
@@ -371,8 +381,8 @@ void genHeightMap() {
 void genTunnelHeights(vector<vector<Point>> tunnels) {
     vector<vector<Point>> tunnelPaths = tunnels;
     for (vector<Point> tunnelPath : tunnelPaths) {
-        float startHeight = heightMap[tunnelPath[0].y][tunnelPath[0].x];
-        float endHeight = heightMap[tunnelPath[tunnelPath.size() - 1].y][tunnelPath[tunnelPath.size() - 1].x];
+        float startHeight = heightMap[tunnelPath[0].x][tunnelPath[0].y];
+        float endHeight = heightMap[tunnelPath[tunnelPath.size() - 1].x][tunnelPath[tunnelPath.size() - 1].y];
         
         for (int i = 0; i < tunnelPath.size(); i++) {
             float t;
@@ -384,17 +394,20 @@ void genTunnelHeights(vector<vector<Point>> tunnels) {
 
             float height = startHeight + t * (endHeight - startHeight);
 
-            heightMap[tunnelPath[i].y][tunnelPath[i].x] = height;
+            heightMap[tunnelPath[i].x][tunnelPath[i].y] = height;
         }
     }
 
 }
 
 // Calls all functions in the correct order
-void genMaps() {
+pair<Map, HeightMap> genMaps() {
     caveGenCycle();
     genHeightMap();
     vector<vector<Point>> tunnelPaths = connectRegions();
     genTunnelHeights(tunnelPaths);
 
+    return {map, heightMap};
 }
+
+#endif
