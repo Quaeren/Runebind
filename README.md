@@ -15,7 +15,7 @@ To try out the cave generation for yourself download the repo and run the CaveGe
 2. Build the project
    **Linux/MacOS** - You should be able to do the same on Windows
    ```Bash
-   g++ -g -std=c++17 graphics.cpp -o -lGLEW -lglfw -lGL graphics
+   g++ -g -std=c++17 graphics.cpp -o graphics -lGLEW -lglfw -lGL
    ./graphics
    ```
    
