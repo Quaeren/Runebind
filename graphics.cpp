@@ -16,12 +16,89 @@
 #include <cmath>
 #include <string>
 #include <vector>
+#include <algorithm>
 
 using namespace std;
 
 // Window dimensions
 const unsigned int SCR_WIDTH = 800;
 const unsigned int SCR_HEIGHT = 600;
+
+// World Generation
+struct VoxelFace {
+    glm::vec3 corners[4];
+    glm::vec3 color;
+    glm::vec3 normal;
+};
+
+VoxelFace faces[] = {
+        // Front (Z)
+        {
+            {
+                {-0.5f, -0.5f,  0.5f},
+                { 0.5f, -0.5f,  0.5f},
+                { 0.5f,  0.5f,  0.5f},
+                {-0.5f,  0.5f,  0.5f}
+            },
+            {1.0f, 0.0f, 0.0f},
+            {0.0f, 0.0f, 1.0f}
+        },
+        // Back (-Z)
+        {
+            {
+                { 0.5f, -0.5f, -0.5f},
+                {-0.5f, -0.5f, -0.5f},
+                {-0.5f,  0.5f, -0.5f},
+                { 0.5f,  0.5f, -0.5f}
+            },
+            {0.0f, 1.0f, 0.0f},
+            {0.0f, 0.0f,-1.0f}
+        },
+        // Right (X)
+        {
+            {
+                { 0.5f, -0.5f,  0.5f},
+                { 0.5f, -0.5f, -0.5f},
+                { 0.5f,  0.5f, -0.5f},
+                { 0.5f,  0.5f,  0.5f}
+            },
+            {0.0f, 0.0f, 1.0f},
+            {1.0f, 0.0f, 0.0f}
+        },
+        // Left (-X)
+        {
+            {
+                {-0.5f, -0.5f, -0.5f},
+                {-0.5f, -0.5f,  0.5f},
+                {-0.5f,  0.5f,  0.5f},
+                {-0.5f,  0.5f, -0.5f}
+            },
+            {1.0f, 0.0f, 1.0f},
+            {-1.0f, 0.0f, 0.0f}
+        },
+        // Top (Y)
+        {
+            {
+                {-0.5f,  0.5f,  0.5f},
+                { 0.5f,  0.5f,  0.5f},
+                { 0.5f,  0.5f, -0.5f},
+                {-0.5f,  0.5f, -0.5f}
+            },
+            {1.0f, 1.0f, 0.0f},
+            {0.0f, 1.0f, 0.0f}
+        },
+        // Bottom (-Y)
+        {
+            {
+                {-0.5f, -0.5f, -0.5f},
+                { 0.5f, -0.5f, -0.5f},
+                { 0.5f, -0.5f,  0.5f},
+                {-0.5f, -0.5f,  0.5f}
+            },
+            {0.0f, 1.0f, 1.0f},
+            {0.0f,-1.0f, 0.0f}
+        }
+    };
 
 // Camera
 Camera camera(glm::vec3(0.0f, 0.0f, 3.0f));
@@ -47,6 +124,7 @@ unsigned int loadTexture(const char* texturePath, string fileType);
 struct Vertex {
     glm::vec3 Position;
     glm::vec3 Color;
+    glm::vec3 Normal;
     glm::vec2 TexCoords;
 };
 
@@ -54,6 +132,8 @@ struct Texture {
     string location;
     unsigned int id;
 };
+
+
 
 class Mesh {
 public:
@@ -119,74 +199,6 @@ Mesh createVoxel() {
     vector<unsigned int> indices;
     vector<Texture> textures;
 
-    struct Face {
-        glm::vec3 corners[4];
-        glm::vec3 color;
-    };
-
-    Face faces[] = {
-        // Front (Z)
-        {
-            {
-                {-0.5f, -0.5f,  0.5f},
-                { 0.5f, -0.5f,  0.5f},
-                { 0.5f,  0.5f,  0.5f},
-                {-0.5f,  0.5f,  0.5f}
-            },
-            {1.0f, 0.0f, 0.0f}
-        },
-        // Back (-Z)
-        {
-            {
-                { 0.5f, -0.5f, -0.5f},
-                {-0.5f, -0.5f, -0.5f},
-                {-0.5f,  0.5f, -0.5f},
-                { 0.5f,  0.5f, -0.5f}
-            },
-            {0.0f, 1.0f, 0.0f}
-        },
-        // Right (X)
-        {
-            {
-                { 0.5f, -0.5f,  0.5f},
-                { 0.5f, -0.5f, -0.5f},
-                { 0.5f,  0.5f, -0.5f},
-                { 0.5f,  0.5f,  0.5f}
-            },
-            {0.0f, 0.0f, 1.0f}
-        },
-        // Left (-X)
-        {
-            {
-                {-0.5f, -0.5f, -0.5f},
-                {-0.5f, -0.5f,  0.5f},
-                {-0.5f,  0.5f,  0.5f},
-                {-0.5f,  0.5f, -0.5f}
-            },
-            {1.0f, 0.0f, 1.0f}
-        },
-        // Top (Y)
-        {
-            {
-                {-0.5f,  0.5f,  0.5f},
-                { 0.5f,  0.5f,  0.5f},
-                { 0.5f,  0.5f, -0.5f},
-                {-0.5f,  0.5f, -0.5f}
-            },
-            {1.0f, 1.0f, 0.0f}
-        },
-        // Bottom (-Y)
-        {
-            {
-                {-0.5f, -0.5f, -0.5f},
-                { 0.5f, -0.5f, -0.5f},
-                { 0.5f, -0.5f,  0.5f},
-                {-0.5f, -0.5f,  0.5f}
-            },
-            {0.0f, 1.0f, 1.0f}
-        }
-    };
-
     glm::vec2 texCoords[] = {
         {0.0f, 0.0f},
         {1.0f, 0.0f},
@@ -202,6 +214,7 @@ Mesh createVoxel() {
 
             vertex.Position = faces[face].corners[i];
             vertex.Color = faces[face].color;
+            vertex.Normal = faces[face].normal;
             vertex.TexCoords = texCoords[i];
 
             vertices.push_back(vertex);
@@ -223,6 +236,53 @@ Mesh createVoxel() {
 struct World {
     vector<glm::ivec3> locations;
 };
+
+bool isVoxelNeighbour(const World& world, const glm::ivec3& location) {
+    return find(world.locations.begin(), world.locations.end(), location) != world.locations.end();
+}
+
+Mesh GenerateMeshFromWorld(World world) {
+    vector<Vertex> vertices;
+    vector<unsigned int> indices;
+    vector<Texture> textures;
+
+    glm::vec2 texCoords[] = {
+        {0.0f, 0.0f},
+        {1.0f, 0.0f},
+        {1.0f, 1.0f},
+        {0.0f, 1.0f}
+    };
+
+    for (glm::ivec3 location : world.locations) {
+        
+        for (const VoxelFace& face : faces) {
+            unsigned int start = vertices.size();
+            glm::ivec3 neighbourLocation = location + glm::ivec3(face.normal);
+            if(isVoxelNeighbour(world, neighbourLocation)) {
+                continue;
+            } else {
+                for (int i = 0; i < 4; i++) {
+                    Vertex vertex;
+
+                    vertex.Position = face.corners[i] + glm::vec3(location);
+                    vertex.Color = face.color;
+                    vertex.Normal = face.normal;
+                    vertex.TexCoords = texCoords[i];
+
+                    vertices.push_back(vertex);
+                }
+                indices.push_back(start);
+                indices.push_back(start + 1);
+                indices.push_back(start + 2);
+
+                indices.push_back(start);
+                indices.push_back(start + 2);
+                indices.push_back(start + 3);
+            }
+        }
+    }
+    return Mesh(vertices, indices, textures);
+}
 
 int main() {
     glfwInit();
@@ -273,7 +333,7 @@ int main() {
         }
     }
 
-
+    Mesh meshWorld = GenerateMeshFromWorld(world);
     // Render loop
     while (!glfwWindowShouldClose(window)) {
         // Time logic pre-frame
@@ -296,12 +356,10 @@ int main() {
         glm::mat4 view = camera.GetViewMatrix();
         shader.setMat4("view", view);
 
-        for (glm::vec3 location : world.locations) {
-            glm::mat4 model = glm::mat4(1.0f);
-            model = glm::translate(model, location);
-            shader.setMat4("model", model);
-            voxel.Draw(shader);
-        }
+        glm::mat4 model = glm::mat4(1.0f);
+        shader.setMat4("model", model);
+        meshWorld.Draw(shader);
+        
 
         // Check and call events then swap buffers
         glfwSwapBuffers(window);
