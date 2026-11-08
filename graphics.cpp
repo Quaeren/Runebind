@@ -7,7 +7,8 @@
 
 #include "shader.h"
 #include "camera.h"
-#include "CaveGeneration.hpp"
+//#include "CaveGeneration.hpp"
+#include "CaveGenerationV2.hpp"
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
@@ -17,6 +18,8 @@
 #include <string>
 #include <vector>
 #include <algorithm>
+#include <functional>
+#include <unordered_set>
 
 using namespace std;
 
@@ -100,6 +103,29 @@ VoxelFace faces[] = {
         }
     };
 
+struct IVec3Hash {
+    size_t operator()(const glm::ivec3& v) const noexcept {
+        size_t h1 = hash<int>{}(v.x);
+        size_t h2 = hash<int>{}(v.y);
+        size_t h3 = hash<int>{}(v.z);
+
+        size_t seed = h1;
+
+        seed ^= h2 + 0x9e37779b9 + (seed << 6) + (seed >> 2);
+        seed ^= h3 + 0x9e37779b9 + (seed << 6) + (seed >> 2);
+
+        return seed;
+    }
+};
+
+struct IVec3Equal {
+    bool operator()(const glm::ivec3& a, const glm::ivec3 b) const noexcept {
+        return a.x == b.x && a.y == b.y && a.z == b.z;
+    }
+};
+
+using VoxelSet = unordered_set<glm::ivec3, IVec3Hash, IVec3Equal>;
+
 // Camera
 Camera camera(glm::vec3(0.0f, 0.0f, 3.0f));
 float lastX = SCR_WIDTH / 2;
@@ -176,10 +202,10 @@ private:
         glBindVertexArray(VAO);
         glBindBuffer(GL_ARRAY_BUFFER, VBO);
         
-        glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(Vertex), &vertices[0], GL_STATIC_DRAW);
+        glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(Vertex), vertices.data(), GL_STATIC_DRAW);
         
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
-        glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(unsigned int), &indices[0], GL_STATIC_DRAW);
+        glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(unsigned int), indices.data(), GL_STATIC_DRAW);
 
         glEnableVertexAttribArray(0);
         glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)0);
@@ -237,8 +263,8 @@ struct World {
     vector<glm::ivec3> locations;
 };
 
-bool isVoxelNeighbour(const World& world, const glm::ivec3& location) {
-    return find(world.locations.begin(), world.locations.end(), location) != world.locations.end();
+bool isVoxelNeighbour(const VoxelSet& voxelSet, const glm::ivec3& location) {
+    return voxelSet.find(location) != voxelSet.end();
 }
 
 Mesh GenerateMeshFromWorld(World world) {
@@ -253,12 +279,20 @@ Mesh GenerateMeshFromWorld(World world) {
         {0.0f, 1.0f}
     };
 
+    VoxelSet voxelSet;
+    voxelSet.reserve(world.locations.size());
+
+    cout << "Generating voxelSet" << endl;
+    for (const glm::ivec3 location : world.locations) {
+        voxelSet.insert(location);
+    }
+    cout << "Finished generating voxelSet" << endl;
+
     for (glm::ivec3 location : world.locations) {
-        
         for (const VoxelFace& face : faces) {
             unsigned int start = vertices.size();
             glm::ivec3 neighbourLocation = location + glm::ivec3(face.normal);
-            if(isVoxelNeighbour(world, neighbourLocation)) {
+            if(isVoxelNeighbour(voxelSet, neighbourLocation)) {
                 continue;
             } else {
                 for (int i = 0; i < 4; i++) {
@@ -320,20 +354,27 @@ int main() {
     shader.use();
 
     Mesh voxel = createVoxel();
-    auto [map, heightMap] = genMaps();
+    auto worldHeightMap = generateWorld();
+    
 
     World world;
-    for (int x = 0; x < MAP_WIDTH; x++) {
-        for (int z = 0; z < MAP_HEIGHT; z++) {
-            if (map[x][z] == 1) {
-                world.locations.push_back(glm::ivec3(x, 1, z));
-            } else {
-                world.locations.push_back(glm::ivec3(x, 0, z));
+    for (int x = 0; x < WORLD_WIDTH; x++) {
+        for (int y = 0; y < WORLD_HEIGHT; y++) {
+            for (int z = 0; z < WORLD_DEPTH; z++) {
+                if (worldHeightMap[x][y][z] == 1) {
+                    world.locations.push_back(glm::ivec3(x, y, z));
+                }
             }
         }
     }
 
+    cout << "Voxel count: " << world.locations.size() << endl;
+
     Mesh meshWorld = GenerateMeshFromWorld(world);
+
+    cout << "Vertex count: " << meshWorld.vertices.size() << endl;
+    cout << "Index count: " << meshWorld.indices.size() << endl;
+
     // Render loop
     while (!glfwWindowShouldClose(window)) {
         // Time logic pre-frame
