@@ -31,14 +31,34 @@ bool firstMouse = true;
 float deltaTime = 0.0f;
 float lastFrame = 0.0f;
 
-struct CylinderMesh {
+struct TubeMesh {
     vector<glm::vec3> vertices;
     vector<unsigned int> indices;
 };
 
-vector<glm::vec3> generateCircle(glm::vec3 center, float radius, glm::vec3 axisU, glm::vec3 axisV, int segments=32) {
+mt19937 rng(1);
+float randomFloat(float min, float max) {
+    uniform_real_distribution<float> distribution(min, max);
+    return distribution(rng);
+}
+
+struct StructurePoint {
+    glm::vec3 position;
+    float radius;
+};
+
+struct Cavern {
+    glm::vec3 center;
+    glm::vec3 radii;
+};
+
+struct CaveSystem {
+    vector<StructurePoint> mainPath;
+    vector<Cavern> caverns;
+};
+
+vector<glm::vec3> generateRing(glm::vec3 center, float radius, glm::vec3 axisU, glm::vec3 axisV, int segments=8) {
     vector<glm::vec3> vertices;
-    vertices.push_back(center);
 
     for (size_t i = 0; i < segments; i++) {
         float angle = (2.0f * glm::pi<float>() * i)/segments;
@@ -48,51 +68,106 @@ vector<glm::vec3> generateCircle(glm::vec3 center, float radius, glm::vec3 axisU
     return vertices;
 }
 
-CylinderMesh generateCylinder(glm::vec3 start, glm::vec3 end, float radius, int segments=32) {
-    CylinderMesh mesh;
+void connectRings(TubeMesh& mesh, unsigned int ringStart, unsigned int nextRingStart, int segments=8) {
+    for (int i = 0; i < segments; i++) {
+        unsigned int a = ringStart+i;
+        unsigned int b = ringStart+ (i+1) % segments;
+        unsigned int c = nextRingStart+i;
+        unsigned int d = nextRingStart + (i+1) % segments;
+
+        mesh.indices.push_back(a);
+        mesh.indices.push_back(b);
+        mesh.indices.push_back(c);
+
+        mesh.indices.push_back(b);
+        mesh.indices.push_back(d);
+        mesh.indices.push_back(c);
+    }
+}
+
+glm::vec3 calculateTangent(const vector<StructurePoint>& points, size_t i) {
+    glm::vec3 tangent;
     
-    glm::vec3 direction = end - start;
-    if (glm::length(direction) < 0.0001f) {
+    if (i == 0) {
+        tangent = glm::normalize(points[i+1].position - points[i].position);
+    } else if (i == points.size() - 1) {
+        tangent = glm::normalize(points[i].position - points[i-1].position);
+    } else {
+        tangent = glm::normalize(points[i+1].position - points[i-1].position);
+    }
+
+    float tangentSquared = glm::dot(tangent, tangent);
+
+    if (tangentSquared < 0.000001f && i < points.size() - 1) {
+        tangent = points[i+1].position - points[i].position;
+        tangentSquared = glm::dot(tangent, tangent);
+    } 
+    if (tangentSquared < 0.000001f && i > 0) {
+        tangent = points[i].position - points[i-1].position;
+        tangentSquared = glm::dot(tangent, tangent);
+    }
+    if (tangentSquared < 0.000001f) {
+        return glm::vec3(0.0f, 0.0f, 1.0f);
+    }
+
+    return glm::normalize(tangent);
+
+}
+
+TubeMesh generateTube(const vector<StructurePoint>& points, int segments=8) {
+    TubeMesh mesh;
+
+    if (points.size() < 2 || segments < 3) {
         return mesh;
     }
-    direction = glm::normalize(direction);
 
-    glm::vec3 helper(0.0f, 1.0f, 0.0f);
+    glm::vec3 tangent = calculateTangent(points, 0);
 
-    if (abs(glm::dot(direction, helper)) > 0.99f) {
+    glm::vec3 helper(0.0f, -1.0f, 0.0f);
+
+    if (abs(glm::dot(tangent, helper)) > 0.99f) {
         helper = glm::vec3(1.0f, 0.0f, 0.0f);
     }
 
-    glm::vec3 axisU = glm::normalize(glm::cross(direction, helper));
-    glm::vec3 axisV = glm::normalize(glm::cross(direction, axisU));
+    glm::vec3 axisU = glm::normalize(glm::cross(tangent, helper));
+    glm::vec3 axisV = glm::normalize(glm::cross(tangent, axisU));
 
-    vector<glm::vec3> bottom = generateCircle(start, radius, axisU, axisV, segments);
-    vector<glm::vec3> top = generateCircle(end, radius, axisU, axisV, segments);
-
-    for (int i = 1; i < bottom.size(); i++) {
-        mesh.vertices.push_back(bottom[i]);
+    vector<glm::vec3> firstRing = generateRing(points[0].position, points[0].radius, axisU, axisV, segments);
+    for (const auto& vertex : firstRing) {
+        mesh.vertices.push_back(vertex);
     }
 
-    for (int i = 1; i < top.size(); i++) {
-        mesh.vertices.push_back(top[i]);
-    }
+    for (size_t i = 1; i < points.size(); i++) {
 
-    for (int i = 0; i < segments; i++) {
-        unsigned int next = (i + 1) % segments;
+        glm::vec3 tangent = calculateTangent(points, i);
 
-        unsigned int bottomCurrent = i;
-        unsigned int bottomNext = next;
+        glm::vec3 axisTempU = axisU - glm::dot(axisU, tangent) * tangent;
+        float axisTempUSquared = glm::dot(axisTempU, axisTempU);
 
-        unsigned int topCurrent = i + segments;
-        unsigned int topNext = next + segments;
+        if (axisTempUSquared < 0.000001f) {
+            glm::vec3 fallback(0.0f, 1.0f, 0.0f);
+            if (abs(glm::dot(tangent, fallback)) > 0.99f) {
+                fallback = glm::vec3(1.0f, 0.0f, 0.0f);
+            }
+            axisTempU = glm::cross(tangent, fallback);
+        }
 
-        mesh.indices.push_back(bottomCurrent);
-        mesh.indices.push_back(bottomNext);
-        mesh.indices.push_back(topNext);
+        axisTempU = glm::normalize(axisTempU);
 
-        mesh.indices.push_back(bottomCurrent);
-        mesh.indices.push_back(topNext);
-        mesh.indices.push_back(topCurrent);
+        glm::vec3 axisTempV = glm::cross(tangent, axisTempU);
+        axisTempV = glm::normalize(axisTempV);
+
+        vector<glm::vec3> ring = generateRing(points[i].position, points[i].radius, axisTempU, axisTempV, segments);
+        unsigned int ringStart = static_cast<unsigned int>(mesh.vertices.size());
+        for (const auto& vertex : ring) {
+            mesh.vertices.push_back(vertex);
+        }
+
+        unsigned int prevRingStart = ringStart - segments;
+        connectRings(mesh, prevRingStart, ringStart, segments);
+
+        axisU = axisTempU;
+        axisV = axisTempV;
     }
     return mesh;
 }
@@ -146,27 +221,6 @@ void scroll_callback(GLFWwindow* window, double xOffset, double yOffset) {
     camera.ProcessMouseScroll(static_cast<float>(yOffset));
 }
 
-mt19937 rng(1);
-float randomFloat(float min, float max) {
-    uniform_real_distribution<float> distribution(min, max);
-    return distribution(rng);
-}
-
-struct StructuralPoint {
-    glm::vec3 position;
-    float radius;
-};
-
-struct Cavern {
-    glm::vec3 center;
-    glm::vec3 radii;
-};
-
-struct CaveSystem {
-    vector<StructuralPoint> mainPath;
-    vector<Cavern> caverns;
-};
-
 glm::vec3 interpolate(glm::vec3 a, glm::vec3 b, float t) {
     t = glm::clamp(t, 0.0f, 1.0f);
     return a + t * (b - a);
@@ -179,15 +233,15 @@ glm::vec3 catmullRom(glm::vec3 p0, glm::vec3 p1, glm::vec3 p2, glm::vec3 p3, flo
     return 0.5f * (2.0f * p1 + (-p0 + p2)*t + 2.0f * (2.0f * p0 - 5.0f * p1 + 4.0f * p2 - p3) * t2 + (-p0 + 3.0f * p1 - 3.0f * p2 + p3) * t3);
 }
 
-vector<StructuralPoint> generateSpline(const vector<StructuralPoint>& controlPoints, int subdivisions=8) {
-    vector<StructuralPoint> splinePoints;
+vector<StructurePoint> generateSpline(const vector<StructurePoint>& controlPoints, int subdivisions=8) {
+    vector<StructurePoint> splinePoints;
 
     if (controlPoints.size() < 2 || subdivisions < 1) {
         return controlPoints;
     }
 
     for (int i = 0; i < controlPoints.size() - 1; i++) {
-        glm::vec3 p0 = controlPoints[max(i - i, 0)].position;
+        glm::vec3 p0 = controlPoints[max(i - 1, 0)].position;
         glm::vec3 p1 = controlPoints[i].position;
         glm::vec3 p2 = controlPoints[i+1].position;
         glm::vec3 p3 = controlPoints[min(i + 2, (int)controlPoints.size() - 1)].position;
@@ -206,14 +260,14 @@ vector<StructuralPoint> generateSpline(const vector<StructuralPoint>& controlPoi
     return splinePoints;
 }
 
-vector<StructuralPoint> generateCavePath(glm::vec3 startPos, glm::vec3 startDirection, int numberOfSteps) {
-    vector<StructuralPoint> points;
+vector<StructurePoint> generateCavePath(glm::vec3 startPos, glm::vec3 startDirection, int numberOfSteps) {
+    vector<StructurePoint> points;
 
     glm::vec3 position = startPos;
     glm::vec3 direction = glm::normalize(startDirection);
     float radius = 4.0f;
 
-    const float stepLength = 1.0f;
+    const float stepLength = 4.0f;
 
     const float directionVariability = 0.15f;
 
@@ -285,24 +339,12 @@ int main() {
 
     glEnable(GL_DEPTH_TEST);
 
-    vector<StructuralPoint> basicPath = generateCavePath(glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.5f, -0.5f, 0.0f), 80);
-    vector<StructuralPoint> smoothPath = generateSpline(basicPath, 8);
+    vector<StructurePoint> basicPath = generateCavePath(glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.5f, -0.5f, 0.0f), 40);
+    vector<StructurePoint> smoothPath = generateSpline(basicPath, 2);
 
-    vector<glm::vec3> vertices;
-    vector<unsigned int> indices;
-
-    for (int i = 0; i < smoothPath.size() - 1; i++) {
-        float radius = (smoothPath[i].radius + smoothPath[i + 1].radius) / 2.0f;
-        CylinderMesh cylinder = generateCylinder(smoothPath[i].position, smoothPath[i + 1].position, radius, 16);
-
-        unsigned int vertexOffset = vertices.size();
-        for (const auto& vertex : cylinder.vertices) {
-            vertices.push_back(vertex);
-        }
-        for (unsigned int index : cylinder.indices) {
-            indices.push_back(index + vertexOffset);
-        }
-    }
+    TubeMesh tube = generateTube(smoothPath, 16);
+    vector<glm::vec3> vertices = tube.vertices;
+    vector<unsigned int> indices = tube.indices;
 
     unsigned int VAO, VBO, EBO;
     glGenVertexArrays(1, &VAO);
@@ -338,6 +380,8 @@ int main() {
         // Render commands
         glClearColor(0.2f, 0.3f, 0.3f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+        glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
 
         shader.use();
 
