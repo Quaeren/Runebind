@@ -8,7 +8,8 @@
 #include "shader.h"
 #include "camera.h"
 //#include "CaveGeneration.hpp"
-#include "CaveGenerationV2.hpp"
+//#include "CaveGenerationV2.hpp"
+#include "VoxelWorld.hpp"
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
@@ -26,105 +27,6 @@ using namespace std;
 // Window dimensions
 const unsigned int SCR_WIDTH = 800;
 const unsigned int SCR_HEIGHT = 600;
-
-// World Generation
-struct VoxelFace {
-    glm::vec3 corners[4];
-    glm::vec3 color;
-    glm::vec3 normal;
-};
-
-VoxelFace faces[] = {
-        // Front (Z)
-        {
-            {
-                {-0.5f, -0.5f,  0.5f},
-                { 0.5f, -0.5f,  0.5f},
-                { 0.5f,  0.5f,  0.5f},
-                {-0.5f,  0.5f,  0.5f}
-            },
-            {1.0f, 0.0f, 0.0f},
-            {0.0f, 0.0f, 1.0f}
-        },
-        // Back (-Z)
-        {
-            {
-                { 0.5f, -0.5f, -0.5f},
-                {-0.5f, -0.5f, -0.5f},
-                {-0.5f,  0.5f, -0.5f},
-                { 0.5f,  0.5f, -0.5f}
-            },
-            {0.0f, 1.0f, 0.0f},
-            {0.0f, 0.0f,-1.0f}
-        },
-        // Right (X)
-        {
-            {
-                { 0.5f, -0.5f,  0.5f},
-                { 0.5f, -0.5f, -0.5f},
-                { 0.5f,  0.5f, -0.5f},
-                { 0.5f,  0.5f,  0.5f}
-            },
-            {0.0f, 0.0f, 1.0f},
-            {1.0f, 0.0f, 0.0f}
-        },
-        // Left (-X)
-        {
-            {
-                {-0.5f, -0.5f, -0.5f},
-                {-0.5f, -0.5f,  0.5f},
-                {-0.5f,  0.5f,  0.5f},
-                {-0.5f,  0.5f, -0.5f}
-            },
-            {1.0f, 0.0f, 1.0f},
-            {-1.0f, 0.0f, 0.0f}
-        },
-        // Top (Y)
-        {
-            {
-                {-0.5f,  0.5f,  0.5f},
-                { 0.5f,  0.5f,  0.5f},
-                { 0.5f,  0.5f, -0.5f},
-                {-0.5f,  0.5f, -0.5f}
-            },
-            {1.0f, 1.0f, 0.0f},
-            {0.0f, 1.0f, 0.0f}
-        },
-        // Bottom (-Y)
-        {
-            {
-                {-0.5f, -0.5f, -0.5f},
-                { 0.5f, -0.5f, -0.5f},
-                { 0.5f, -0.5f,  0.5f},
-                {-0.5f, -0.5f,  0.5f}
-            },
-            {0.0f, 1.0f, 1.0f},
-            {0.0f,-1.0f, 0.0f}
-        }
-    };
-
-struct IVec3Hash {
-    size_t operator()(const glm::ivec3& v) const noexcept {
-        size_t h1 = hash<int>{}(v.x);
-        size_t h2 = hash<int>{}(v.y);
-        size_t h3 = hash<int>{}(v.z);
-
-        size_t seed = h1;
-
-        seed ^= h2 + 0x9e37779b9 + (seed << 6) + (seed >> 2);
-        seed ^= h3 + 0x9e37779b9 + (seed << 6) + (seed >> 2);
-
-        return seed;
-    }
-};
-
-struct IVec3Equal {
-    bool operator()(const glm::ivec3& a, const glm::ivec3 b) const noexcept {
-        return a.x == b.x && a.y == b.y && a.z == b.z;
-    }
-};
-
-using VoxelSet = unordered_set<glm::ivec3, IVec3Hash, IVec3Equal>;
 
 // Camera
 Camera camera(glm::vec3(0.0f, 0.0f, 3.0f));
@@ -158,8 +60,6 @@ struct Texture {
     string location;
     unsigned int id;
 };
-
-
 
 class Mesh {
 public:
@@ -259,15 +159,7 @@ Mesh createVoxel() {
     return Mesh(vertices, indices, textures);
 }
 
-struct World {
-    vector<glm::ivec3> locations;
-};
-
-bool isVoxelNeighbour(const VoxelSet& voxelSet, const glm::ivec3& location) {
-    return voxelSet.find(location) != voxelSet.end();
-}
-
-Mesh GenerateMeshFromWorld(World world) {
+Mesh GenerateMeshFromWorld(VoxelWorld world) {
     vector<Vertex> vertices;
     vector<unsigned int> indices;
     vector<Texture> textures;
@@ -279,26 +171,17 @@ Mesh GenerateMeshFromWorld(World world) {
         {0.0f, 1.0f}
     };
 
-    VoxelSet voxelSet;
-    voxelSet.reserve(world.locations.size());
-
-    cout << "Generating voxelSet" << endl;
-    for (const glm::ivec3 location : world.locations) {
-        voxelSet.insert(location);
-    }
-    cout << "Finished generating voxelSet" << endl;
-
-    for (glm::ivec3 location : world.locations) {
+    for (const glm::ivec3 location : world.getVoxels()) {
         for (const VoxelFace& face : faces) {
             unsigned int start = vertices.size();
             glm::ivec3 neighbourLocation = location + glm::ivec3(face.normal);
-            if(isVoxelNeighbour(voxelSet, neighbourLocation)) {
+            if(world.checkForVoxel(neighbourLocation)) {
                 continue;
             } else {
                 for (int i = 0; i < 4; i++) {
                     Vertex vertex;
 
-                    vertex.Position = face.corners[i] + glm::vec3(location);
+                    vertex.Position = face.corners[i] * world.getVoxelSize() + glm::vec3(location);
                     vertex.Color = face.color;
                     vertex.Normal = face.normal;
                     vertex.TexCoords = texCoords[i];
@@ -354,26 +237,17 @@ int main() {
     shader.use();
 
     Mesh voxel = createVoxel();
-    auto worldHeightMap = generateWorld();
-    
+    Cave cave;
+    VoxelWorld world;
+    cave.generateWorld();
+    world.generateFromSDF(cave);
 
-    World world;
-    for (int x = 0; x < WORLD_WIDTH; x++) {
-        for (int y = 0; y < WORLD_HEIGHT; y++) {
-            for (int z = 0; z < WORLD_DEPTH; z++) {
-                if (worldHeightMap[x][y][z] == 1) {
-                    world.locations.push_back(glm::ivec3(x, y, z));
-                }
-            }
-        }
-    }
-
-    cout << "Voxel count: " << world.locations.size() << endl;
 
     Mesh meshWorld = GenerateMeshFromWorld(world);
 
     cout << "Vertex count: " << meshWorld.vertices.size() << endl;
     cout << "Index count: " << meshWorld.indices.size() << endl;
+    cout << "Voxel count:" << world.getVoxelSetSize() << endl;
 
     // Render loop
     while (!glfwWindowShouldClose(window)) {

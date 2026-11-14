@@ -58,14 +58,19 @@ float randomFloat(float min, float max) {
     uniform_real_distribution<float> distribution(min, max);
     return distribution(rng);
 }
+
+float sMin(float a, float b, float k) {
+    float h = glm::max(k - glm::abs(a-b), 0.0f) / k;
+    return glm::min(a, b) - h * h * k * 0.25f;
+}
 // Funcion to generate a ring on any axis
 vector<glm::vec3> generateRing(glm::vec3 center, float radius, glm::vec3 axisU, glm::vec3 axisV, int segments=8) {
     vector<glm::vec3> vertices;
 
     for (size_t i = 0; i < segments; i++) {
         float angle = (2.0f * glm::pi<float>() * i)/segments;
-        glm::vec3 position = center + radius * (cos(angle) * axisU + sin(angle) * axisV);
-        vertices.push_back(position);
+        glm::vec3 location = center + radius * (cos(angle) * axisU + sin(angle) * axisV);
+        vertices.push_back(location);
     }
     return vertices;
 }
@@ -174,8 +179,8 @@ Mesh generateTunnel(const vector<StructurePoint>& points, int segments=8) {
     return mesh;
 }
 
-bool isInsideCavern(const Cavern& cavern, glm::vec3 position) {
-    glm::vec3 relative = position - cavern.center;
+bool isInsideCavern(const Cavern& cavern, glm::vec3 location) {
+    glm::vec3 relative = location - cavern.center;
     if (cavern.radii.x == 0 || cavern.radii.y == 0 || cavern.radii.z == 0) {
         return false;
     }
@@ -301,7 +306,6 @@ glm::vec3 catmullRom(glm::vec3 p0, glm::vec3 p1, glm::vec3 p2, glm::vec3 p3, flo
 
     return 0.5f * (2.0f * p1 + (-p0 + p2)*t + 2.0f * (2.0f * p0 - 5.0f * p1 + 4.0f * p2 - p3) * t2 + (-p0 + 3.0f * p1 - 3.0f * p2 + p3) * t3);
 }
-
 // Function that takes a set of points and smooths the transition between them
 vector<StructurePoint> generateSpline(const vector<StructurePoint>& controlPoints, int subdivisions=8) {
     vector<StructurePoint> splinePoints;
@@ -361,10 +365,55 @@ vector<StructurePoint> generateCavePath(glm::vec3 startPos, glm::vec3 startDirec
 
     return points;
 }
-// Function that generates the full cae structure - to be implemented
-CaveSystem generateCaveStructure();
-// Function to convert cave structure into voxels - to be implemented
-void convertCaveIntoVoxels(const CaveSystem& cave);
+
+float tunnelSegmentSDF(const glm::vec3& position, const StructurePoint& start, const StructurePoint& end) {
+    glm::vec3 segment = end.position - start.position;
+    float lengthSquared = glm::dot(segment, segment);
+    float t = 0.0f;
+
+    if(lengthSquared >= 0.000001f) {
+        t = glm::dot(position - start.position, segment / lengthSquared);
+    }
+
+    t = glm::clamp(t, 0.0f, 1.0f);
+    glm::vec3 closestPoint = start.position + t * segment;
+    float distance = glm::length(position - closestPoint);
+    float radius = glm::mix(start.radius, end.radius, t);
+    return distance - radius;
+}
+
+float cavernSDF(const glm::vec3& position, const Cavern& cavern) {
+    glm::vec3 relative = position - cavern.center;
+    glm::vec3 radii = cavern.radii;
+
+    if(radii.x <= 0.0f || radii.y <= 0.0f || radii.z <= 0.0f) {
+        return 100000.0f;
+    }
+
+    float k0 = glm::length(relative / radii);
+    float k1 = glm::length(relative / (radii * radii));
+
+    if (k1 < 0.000001f) {
+        return -glm::min(radii.x, glm::min(radii.y, radii.z));
+    }
+    return k0 * (k0 - 1.0f) / k1;
+}
+
+float caveSDF(const glm::vec3& location, const CaveSystem& cave, float blendstrength=3.0f) {
+    float distance = 100000.0f;
+
+    for (size_t i = 0; i < cave.mainPath.size() - 1; i++) {
+        float segmentDistance = tunnelSegmentSDF(location, cave.mainPath[i], cave.mainPath[i+1]);
+        distance = sMin(distance, segmentDistance, blendstrength);
+    }
+    for (const auto& cavern : cave.caverns) {
+        float cavernDistance = cavernSDF(location, cavern);
+        distance = sMin(distance, cavernDistance, blendstrength);
+    }
+    return distance;
+}
+
+
 
 int main() {
     glfwInit();
