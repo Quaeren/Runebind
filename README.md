@@ -14,7 +14,7 @@ To try out the cave generation for yourself download the repo and run the CaveGe
    ./graphics
    ```
 ## Testing Cave Generation V3
-![Image of testing for gen 3 cave generation](images/screenshot-2026-11-09T11:43:30.095262162+01:00)
+![Image of testing for gen 3 cave generation](images/screenshot-2026-11-09T11:43:30.095262162+01:00.png)
 This generation I am momentarily building and testing makes a long corridor which later I will add branching corridors and caverns to. This gives the players a "set path" to explore instead of a large cave like structure which was gen 2. The aim is to also automate the placement of ruins throughout the cave for players to explore.
 1. Download the files in this repo, make sure you have all the needed libraries (glm, glew and opengl, fastnoiselite) in your include folder
 2. Unzip the file and go into the folder
