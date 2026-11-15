@@ -17,6 +17,10 @@ float randomFloat(float min, float max) {
     std::uniform_real_distribution<float> distribution(min, max);
     return distribution(rng);
 }
+int randomInt(int min, int max) {
+    std::uniform_int_distribution<int> distribution(min, max);
+    return distribution(rng);
+}
 
 float sMin(float a, float b, float k) {
     float h = glm::max(k - glm::abs(a-b), 0.0f) / k;
@@ -45,7 +49,9 @@ public:
 
 private:
     std::vector<StructurePoint> mainPath;
+    std::vector<std::vector<StructurePoint>> sidePaths;
     std::vector<Cavern> caverns;
+    std::vector<Cavern> largeCaverns;
 
     void generateCavePath(glm::vec3 startPos, glm::vec3 startDirection, int numberOfSteps) {
         glm::vec3 position = startPos;
@@ -100,7 +106,72 @@ private:
         splinePoints.push_back(mainPath.back());
         mainPath = splinePoints;
     }
-    void generateCaverns() {
+    void generateBranches() {
+        const float directionVariability = 0.15f;
+        float stepLength = 4.0f;
+        std::vector<StructurePoint> branchStarts;
+
+        for (const StructurePoint& point : mainPath) {
+            if (randomInt(1, 100) <= 5) {
+                branchStarts.push_back(point);
+            }
+        }
+        for (const StructurePoint& point : branchStarts) {
+            std::vector<StructurePoint> sidePath;
+            sidePath.push_back(point);
+            glm::vec3 direction = glm::vec3(randomFloat(-0.5, 0.5), randomFloat(-0.1, 0.1), randomFloat(-0.5, 0.5));
+            int numberOfSteps = randomInt(20, 80);
+            glm::vec3 position = point.position;
+            float radius = 4.0f;
+
+            for (int i = 0; i < numberOfSteps; i++) {
+                glm::vec3 randomChange(
+                    randomFloat(-directionVariability, directionVariability),
+                    randomFloat(-directionVariability, directionVariability),
+                    randomFloat(-directionVariability, directionVariability)
+                );
+                float radiusChange = randomFloat(-0.3f, 0.3f);
+
+                direction += randomChange;
+                direction = glm::normalize(direction);
+
+                position += direction * stepLength;
+                radius += radiusChange;
+                radius = glm::clamp(radius, 2.0f, 6.0f);
+                sidePath.push_back({position, radius});
+            }
+            sidePaths.push_back(sidePath);
+        }
+    }
+    void generateSplineBranches(int subdivisions=8) {
+        std::vector<std::vector<StructurePoint>> splineSidePaths;
+        for (auto sidePath : sidePaths) {
+            std::vector<StructurePoint> splineSidePath;
+            if (sidePath.size() < 2 || subdivisions < 2) {
+                continue;
+            }
+            for (int i = 0; i < sidePath.size() - 1; i++) {
+                glm::vec3 p0 = sidePath[std::max(i - 1, 0)].position;
+                glm::vec3 p1 = sidePath[i].position;
+                glm::vec3 p2 = sidePath[i+1].position;
+                glm::vec3 p3 = sidePath[std::min(i + 2, (int)sidePath.size() - 1)].position;
+
+                float r1 = sidePath[i].radius;
+                float r2 = sidePath[i + 1].radius;
+
+                for (int j = 0; j < subdivisions; j++) {
+                    float t = (float)j / subdivisions;
+                    glm::vec3 position = catmullRom(p0, p1, p2, p3, t);
+                    float radius = glm::mix(r1, r2, t);
+                    splineSidePath.push_back({position, radius});
+                }
+            }
+            splineSidePath.push_back(sidePath.back());
+            splineSidePaths.push_back(splineSidePath);
+        }
+        sidePaths = splineSidePaths;
+    }
+    void generateCaverns(std::vector<StructurePoint> points) {
         int cavernCount = static_cast<int>(randomFloat(2, 6));
         
         if (mainPath.size() < 3) {
@@ -108,12 +179,19 @@ private:
         }
 
         for (int i = 0; i < cavernCount; i++) {
-            int interval = (mainPath.size() - 2) / cavernCount;
+            int interval = (points.size() - 2) / cavernCount;
             int approxIndex = 1 + i * interval;
             int randomIndex = static_cast<float>(randomFloat(-3.0f, 3.0f));
-            int index = glm::clamp(approxIndex + randomIndex, 1, static_cast<int>(mainPath.size()));
+            int index = glm::clamp(approxIndex + randomIndex, 1, static_cast<int>(points.size()-1));
 
-            glm::vec3 center = mainPath[index].position;
+            if (largeCaverns.size() < 2 || randomInt(1, 100) <= 5) {
+                glm::vec3 center = points[index].position;
+                glm::vec3 radii(randomFloat(20.0f, 40.0f), randomFloat(20.0f, 30.0f), randomFloat(20.0f, 40.0f));
+                largeCaverns.push_back({center, radii});
+                continue;
+            }
+
+            glm::vec3 center = points[index].position;
             glm::vec3 radii(randomFloat(8.0f, 16.0f), randomFloat(5.0f, 10.0f), randomFloat(8.0f, 16.0f));
 
             caverns.push_back({center, radii});
@@ -121,7 +199,7 @@ private:
     }
 
 public:
-        float tunnelSegmentSDF(glm::vec3 position, const StructurePoint& start, const StructurePoint& end) {
+    float tunnelSegmentSDF(glm::vec3 position, const StructurePoint& start, const StructurePoint& end) {
         glm::vec3 segment = end.position - start.position;
         float lengthSquared = glm::dot(segment, segment);
         float t = 0.0f;
@@ -167,6 +245,19 @@ public:
             }
         }
 
+        for (const auto& sidePath : sidePaths) {
+            for (size_t i = 0; i+1 < sidePath.size(); i++) {
+                float segmentDistance = tunnelSegmentSDF(location, sidePath[i], sidePath[i + 1]);
+
+                if (!hasShape) {
+                    distance = segmentDistance;
+                    hasShape = true;
+                } else {
+                    distance = sMin(distance, segmentDistance, blendstrength);
+                }
+            }
+        }
+
         for (const auto& cavern : caverns) {
             float cavernDistance = cavernSDF(location, cavern);
 
@@ -178,19 +269,35 @@ public:
             }
         }
 
+        for (const auto& largeCavern : largeCaverns) {
+            float largeCavernDistance = cavernSDF(location, largeCavern);
+
+            if(!hasShape) {
+                distance = largeCavernDistance;
+                hasShape = true;
+            } else {
+                distance = sMin(distance, largeCavernDistance, blendstrength);
+            }
+        }
+
         return hasShape ? distance : 100000.0f;
     }
 
     void generateWorld(glm::vec3 origin = {0.0f, 0.0f, 0.0f}, int tunnelLength=50, int segments=2) {
         mainPath.clear();
         caverns.clear();
-        generateCavePath(origin, glm::vec3(0.5f, -0.5f, 0.0f),tunnelLength);
+        sidePaths.clear();
+        generateCavePath(origin, glm::vec3(0.5f, -0.2f, 0.0f),tunnelLength);
         generateSpline(segments);
-        generateCaverns();
+        generateBranches();
+        generateSplineBranches(segments);
+        generateCaverns(mainPath);
+        for (auto sidePath : sidePaths) { generateCaverns(sidePath); }
     }
 
     const std::vector<StructurePoint>& getMainPath() { return mainPath; }
     const std::vector<Cavern>& getCaverns() {return caverns; }
+    const std::vector<std::vector<StructurePoint>>& getSidePaths() {return sidePaths; }
 
     
 };
@@ -319,8 +426,6 @@ public:
 
         glm::ivec3 minVoxel = glm::ivec3(glm::floor((minBounds - worldOrigin) / voxelSize));
         glm::ivec3 maxVoxel = glm::ivec3(glm::ceil((maxBounds - worldOrigin) / voxelSize));
-        minVoxel = worldToVoxel(minVoxel);
-        maxVoxel = worldToVoxel(maxVoxel);
 
         for (int x = minVoxel.x; x <= maxVoxel.x; ++x) {
             for (int y = minVoxel.y; y <= maxVoxel.y; ++y) {
@@ -341,9 +446,6 @@ public:
         glm::ivec3 minVoxel = glm::ivec3(glm::floor((minBounds - worldOrigin) / voxelSize));
         glm::ivec3 maxVoxel = glm::ivec3(glm::ceil((maxBounds - worldOrigin) / voxelSize));
 
-        minVoxel = worldToVoxel(minVoxel);
-        maxVoxel = worldToVoxel(maxVoxel);
-
         for (int x = minVoxel.x; x <= maxVoxel.x; ++x) {
             for (int y = minVoxel.y; y <= maxVoxel.y; ++y) {
                 for (int z = minVoxel.z; z <= maxVoxel.z; ++z) {
@@ -363,10 +465,16 @@ public:
         voxelSet.clear();
 
         const auto& path = cave.getMainPath();
+        const auto sidePaths = cave.getSidePaths();
         const auto& caverns = cave.getCaverns();
 
         for (size_t i = 0; i + 1 < path.size(); ++i) {
             generateTunnelSegment(cave, path[i], path[i+1], shellThickness);
+        }
+        for (auto sidePath : sidePaths) {
+            for (size_t i = 0; i + 1 < sidePath.size(); ++i) {
+                generateTunnelSegment(cave, sidePath[i], sidePath[i+1], shellThickness);
+            }
         }
         for (const auto& cavern : caverns) {
             generateCavern(cave, cavern, shellThickness);
