@@ -2,39 +2,151 @@
 #define VOXELWORD_HPP
 
 #include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 
+#include <unordered_map>
 #include <unordered_set>
 #include <functional>
 #include <random>
 #include <iostream>
 #include <vector>
+#include <string>
 
-int seed = time(nullptr);
+inline const int seed = time(nullptr);
+static constexpr int CHUNK_SIZE = 24;
 
 // Random number generator with pre set seed for debugging
-std::mt19937 rng(seed);
-float randomFloat(float min, float max) {
+inline std::mt19937 rng(seed);
+inline float randomFloat(float min, float max) {
     std::uniform_real_distribution<float> distribution(min, max);
     return distribution(rng);
 }
-int randomInt(int min, int max) {
+inline int randomInt(int min, int max) {
     std::uniform_int_distribution<int> distribution(min, max);
     return distribution(rng);
 }
 
-float sMin(float a, float b, float k) {
+inline float sMin(float a, float b, float k) {
     float h = glm::max(k - glm::abs(a-b), 0.0f) / k;
     return glm::min(a, b) - h * h * k * 0.25f;
 }
 
+inline int fDivision(int value, int divisor) {
+    int result = value / divisor;
+    int remainder = value % divisor;   
+    if (remainder < 0) {result--;}
+    return result;
+
+}
+
 
 // Function make curved line between two points instead of a normal straight one
-glm::vec3 catmullRom(glm::vec3 p0, glm::vec3 p1, glm::vec3 p2, glm::vec3 p3, float t) {
+inline glm::vec3 catmullRom(glm::vec3 p0, glm::vec3 p1, glm::vec3 p2, glm::vec3 p3, float t) {
     float t2 = t * t;
     float t3 = t2 * t;
 
     return 0.5f * (2.0f * p1 + (-p0 + p2)*t + 2.0f * (2.0f * p0 - 5.0f * p1 + 4.0f * p2 - p3) * t2 + (-p0 + 3.0f * p1 - 3.0f * p2 + p3) * t3);
 }
+
+struct Vertex {
+    glm::vec3 Position;
+    glm::vec3 Color;
+    glm::vec3 Normal;
+    glm::vec2 TexCoords;
+};
+
+struct Texture {
+    std::string location;
+    unsigned int id;
+};
+
+class Mesh {
+public:
+    std::vector<Vertex> vertices;
+    std::vector<unsigned int> indices;
+    std::vector<Texture> textures;
+
+    Mesh() {
+        setupMesh();
+    }
+
+    Mesh(std::vector<Vertex> vertices, std::vector<unsigned int> indices, std::vector<Texture> textures) {
+        this->vertices = vertices;
+        this->indices = indices;
+        this->textures = textures;
+
+        setupMesh();
+        uploadMesh();
+    }
+    Mesh(const Mesh&) = delete;
+    Mesh& operator=(const Mesh&) = delete;
+    
+    void Draw(Shader &shader) {
+        for (std::size_t i = 0; i < textures.size(); i++) {
+            glActiveTexture(GL_TEXTURE0 + i);
+            std::string name = "texture" + std::to_string(i+1);
+
+            shader.setInt(name, i);
+            glBindTexture(GL_TEXTURE_2D, textures[i].id);
+        }
+        glActiveTexture(GL_TEXTURE0);
+
+        glBindVertexArray(VAO);
+        glDrawElements(GL_TRIANGLES, indices.size(), GL_UNSIGNED_INT, 0);
+        glBindVertexArray(0);
+    }
+
+    void updateMesh(const std::vector<Vertex>& updatedVertices, const std::vector<unsigned int>& updatedIndices) {
+        vertices = updatedVertices;
+        indices = updatedIndices;
+
+        glBindVertexArray(VAO);
+        glBindBuffer(GL_ARRAY_BUFFER, VBO);
+        
+        glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(Vertex), vertices.data(), GL_DYNAMIC_DRAW);
+        
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
+        glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(unsigned int), indices.data(), GL_DYNAMIC_DRAW);
+        glBindVertexArray(0);
+    }
+
+    ~Mesh() {
+        if (VAO) { glDeleteVertexArrays(1, &VAO); }
+        if (VBO) { glDeleteBuffers(1, &VBO); }
+        if (EBO) { glDeleteBuffers(1, &EBO); }
+    }
+
+private:
+    unsigned int VAO, VBO, EBO;
+    
+    void setupMesh() {
+        glGenVertexArrays(1, &VAO);
+        glGenBuffers(1, &VBO);
+        glGenBuffers(1, &EBO);
+
+        glBindVertexArray(VAO);
+        glBindBuffer(GL_ARRAY_BUFFER, VBO);
+        
+        glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(Vertex), vertices.data(), GL_STATIC_DRAW);
+        
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
+        glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(unsigned int), indices.data(), GL_STATIC_DRAW);
+
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)0);
+
+        glEnableVertexAttribArray(1);
+        glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, Color));
+
+        glEnableVertexAttribArray(2);
+        glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, TexCoords));
+
+        glBindVertexArray(0);
+    }
+    void uploadMesh() {
+        updateMesh(vertices, indices);
+    }
+};
 
 class Cave {
 public:
@@ -45,6 +157,10 @@ public:
     struct Cavern {
         glm::vec3 center;
         glm::vec3 radii;
+    };
+    struct LocalShape {
+        std::vector<std::pair<const StructurePoint*, const StructurePoint*>> segments;
+        std::vector<const Cavern*> caverns;
     };
 
 private:
@@ -112,7 +228,7 @@ private:
         std::vector<StructurePoint> branchStarts;
 
         for (const StructurePoint& point : mainPath) {
-            if (randomInt(1, 100) <= 5) {
+            if (randomInt(1, 100) <= 1) {
                 branchStarts.push_back(point);
             }
         }
@@ -120,7 +236,7 @@ private:
             std::vector<StructurePoint> sidePath;
             sidePath.push_back(point);
             glm::vec3 direction = glm::vec3(randomFloat(-0.5, 0.5), randomFloat(-0.1, 0.1), randomFloat(-0.5, 0.5));
-            int numberOfSteps = randomInt(20, 80);
+            int numberOfSteps = randomInt(20, 60);
             glm::vec3 position = point.position;
             float radius = 4.0f;
 
@@ -145,7 +261,7 @@ private:
     }
     void generateSplineBranches(int subdivisions=8) {
         std::vector<std::vector<StructurePoint>> splineSidePaths;
-        for (auto sidePath : sidePaths) {
+        for (const auto& sidePath : sidePaths) {
             std::vector<StructurePoint> splineSidePath;
             if (sidePath.size() < 2 || subdivisions < 2) {
                 continue;
@@ -173,18 +289,18 @@ private:
     }
     void generateCaverns(std::vector<StructurePoint> points) {
         int cavernCount = static_cast<int>(randomFloat(2, 6));
-        
-        if (mainPath.size() < 3) {
+        std::cout << "Cavern count: " << cavernCount << std::endl;
+        if (points.size() < 3) {
             return;
         }
 
         for (int i = 0; i < cavernCount; i++) {
             int interval = (points.size() - 2) / cavernCount;
             int approxIndex = 1 + i * interval;
-            int randomIndex = static_cast<float>(randomFloat(-3.0f, 3.0f));
+            int randomIndex = randomFloat(-3, 3);
             int index = glm::clamp(approxIndex + randomIndex, 1, static_cast<int>(points.size()-1));
 
-            if (largeCaverns.size() < 2 || randomInt(1, 100) <= 5) {
+            if (largeCaverns.size() < 3 && randomInt(1, 100) <= 10) {
                 glm::vec3 center = points[index].position;
                 glm::vec3 radii(randomFloat(20.0f, 40.0f), randomFloat(20.0f, 30.0f), randomFloat(20.0f, 40.0f));
                 largeCaverns.push_back({center, radii});
@@ -192,14 +308,14 @@ private:
             }
 
             glm::vec3 center = points[index].position;
-            glm::vec3 radii(randomFloat(8.0f, 16.0f), randomFloat(5.0f, 10.0f), randomFloat(8.0f, 16.0f));
+            glm::vec3 radii(randomFloat(12.0f, 20.0f), randomFloat(10.0f, 20.0f), randomFloat(12.0f, 20.0f));
 
             caverns.push_back({center, radii});
         }
     }
 
 public:
-    float tunnelSegmentSDF(glm::vec3 position, const StructurePoint& start, const StructurePoint& end) {
+    float tunnelSegmentSDF(glm::vec3 position, const StructurePoint& start, const StructurePoint& end) const {
         glm::vec3 segment = end.position - start.position;
         float lengthSquared = glm::dot(segment, segment);
         float t = 0.0f;
@@ -214,7 +330,7 @@ public:
         float radius = glm::mix(start.radius, end.radius, t);
         return distance - radius;
     }
-    float cavernSDF(const glm::vec3& position, const Cavern& cavern) {
+    float cavernSDF(const glm::vec3& position, const Cavern& cavern) const {
         glm::vec3 relative = position - cavern.center;
         glm::vec3 radii = cavern.radii;
 
@@ -230,6 +346,67 @@ public:
         }
         return k0 * (k0 - 1.0f) / k1;
     }
+    void bounds(glm::vec3& minCorner, glm::vec3& maxCorner) const {
+        minCorner = glm::vec3(1e30f);
+        maxCorner = glm::vec3(-1e30f);
+        auto addPath = [&](const std::vector<StructurePoint>& points) {
+            for (auto& point : points) {
+                minCorner = glm::min(minCorner, point.position - point.radius);
+                maxCorner = glm::max(maxCorner, point.position + point.radius);
+            }
+        };
+        addPath(mainPath);
+        for (auto& sidePath : sidePaths) { addPath(sidePath); }
+        for (auto& cavern : caverns) {
+            minCorner = glm::min(minCorner, cavern.center - cavern.radii);
+            maxCorner = glm::max(maxCorner, cavern.center + cavern.radii);
+        }
+        for (auto& largeCavern : largeCaverns) {
+            minCorner = glm::min(minCorner, largeCavern.center - largeCavern.radii);
+            maxCorner = glm::max(maxCorner, largeCavern.center + largeCavern.radii);            
+        }
+    }
+    LocalShape gather(const glm::vec3& minCorner, const glm::vec3& maxCorner, float margin) const {
+        LocalShape output;
+        auto addPath = [&](const std::vector<StructurePoint>& path) {
+            for (size_t i = 0; i+1 < path.size(); ++i) {
+                const auto& a = path[i];
+                const auto& b = path[i+1];
+                float r = glm::max(a.radius, b.radius) + margin;
+                glm::vec3 bmin = glm::min(a.position, b.position) - r;
+                glm::vec3 bmax = glm::max(a.position, b.position) + r;
+                if (glm::all(glm::lessThanEqual(bmin, maxCorner)) && glm::all(glm::greaterThanEqual(bmax, minCorner))) {
+                    output.segments.push_back({&a, &b});
+                }
+            }
+        };
+        addPath(mainPath);
+        for (auto& sidePath : sidePaths) { addPath(sidePath); }
+        for (auto& cavern : caverns) {
+            glm::vec3 bmin = cavern.center - cavern.radii - margin;
+            glm::vec3 bmax = cavern.center + cavern.radii + margin;
+            if (glm::all(glm::lessThanEqual(bmin, maxCorner)) && glm::all(glm::greaterThanEqual(bmax, minCorner))) {
+                    output.caverns.push_back(&cavern);
+            }
+        }
+        for (auto& largeCavern : largeCaverns) {
+            glm::vec3 bmin = largeCavern.center - largeCavern.radii - margin;
+            glm::vec3 bmax = largeCavern.center + largeCavern.radii + margin;
+            if (glm::all(glm::lessThanEqual(bmin, maxCorner)) && glm::all(glm::greaterThanEqual(bmax, minCorner))) {
+                    output.caverns.push_back(&largeCavern);
+            }         
+        }        
+        return output;
+    }
+    float localSDF(const glm::vec3& pos, const LocalShape& shape, float k = 3.0f) const {
+        float distance = 100'000.0f;
+        bool has = false;
+        auto combine = [&](float v) {distance = has ? sMin(distance, v, k) : v; has = true; };
+        for (auto& [a, b] : shape.segments) { combine(tunnelSegmentSDF(pos, *a, *b)); }
+        for (auto* cavern : shape.caverns) { combine(cavernSDF(pos, *cavern)); }
+        return distance;
+    }
+
     float caveSDF(glm::vec3& location, float blendstrength = 3.0f) {
         bool hasShape = false;
         float distance = 0.0f;
@@ -283,9 +460,10 @@ public:
         return hasShape ? distance : 100000.0f;
     }
 
-    void generateWorld(glm::vec3 origin = {0.0f, 0.0f, 0.0f}, int tunnelLength=50, int segments=2) {
+    void generateWorld(glm::vec3 origin = {0.0f, 0.0f, 0.0f}, int tunnelLength=100, int segments=2) {
         mainPath.clear();
         caverns.clear();
+        largeCaverns.clear();
         sidePaths.clear();
         generateCavePath(origin, glm::vec3(0.5f, -0.2f, 0.0f),tunnelLength);
         generateSpline(segments);
@@ -298,6 +476,7 @@ public:
     const std::vector<StructurePoint>& getMainPath() { return mainPath; }
     const std::vector<Cavern>& getCaverns() {return caverns; }
     const std::vector<std::vector<StructurePoint>>& getSidePaths() {return sidePaths; }
+    const std::vector<Cavern>& getLargeCaverns() { return largeCaverns; }
 
     
 };
@@ -393,94 +572,233 @@ struct IVec3Hash {
 };
 
 struct IVec3Equal {
-    bool operator()(const glm::ivec3& a, const glm::ivec3 b) const noexcept {
+    bool operator()(const glm::ivec3& a, const glm::ivec3& b) const noexcept {
         return a.x == b.x && a.y == b.y && a.z == b.z;
     }
 };
 
-using VoxelSet = std::unordered_set<glm::ivec3, IVec3Hash, IVec3Equal>;
+class VoxelWorld;
+
+class Chunk {
+private:
+    glm::ivec3 chunkPosition;
+    std::unordered_map<glm::ivec3, int, IVec3Hash, IVec3Equal> localVoxels;
+    Mesh mesh;
+    bool meshUpdateNeeded = true;
+
+    bool isValidLocalPos(const glm::ivec3& localPos) const {
+        return (localPos.x < 24 && localPos.x >= 0 && localPos.y < 24 && localPos.y >= 0 && localPos.z < 24 && localPos.z >= 0);
+    }
+public:
+    Chunk(glm::ivec3 position) : chunkPosition(position) {}
+
+    void addVoxel(glm::ivec3 localPos) {
+        if (!isValidLocalPos(localPos)) return;
+        localVoxels[localPos] = 1;
+        meshUpdateNeeded = true;
+    }
+    void removeVoxel(glm::ivec3 localPos) {
+        if (!isValidLocalPos(localPos)) return;
+        if (localVoxels.erase(localPos) > 0) meshUpdateNeeded = true;
+    }
+    bool checkForVoxel(glm::ivec3 localPos) const { return localVoxels.find(localPos) != localVoxels.end(); }
+
+    void markMeshUpdateNeeded() { meshUpdateNeeded = true; }
+    void clearMeshUpdateNeeded() { meshUpdateNeeded = false; }
+    
+    bool returnMeshUpdateNeeded() const {return meshUpdateNeeded; }
+    const glm::ivec3& getPosition() const { return chunkPosition; }
+    const std::unordered_map<glm::ivec3, int, IVec3Hash, IVec3Equal>& getLocalVoxels() const { return localVoxels; }
+    Mesh& getMesh() { return mesh; }
+
+    void generateMesh(const VoxelWorld& world);
+};
 
 class VoxelWorld {
 private:
-    VoxelSet voxelSet;
-    
+    std::unordered_map<glm::ivec3, Chunk, IVec3Hash, IVec3Equal> chunks;
     glm::vec3 worldOrigin;
     float voxelSize;
 
     glm::ivec3 worldToVoxel(const glm::vec3& pos) const { return glm::ivec3((pos - worldOrigin) / voxelSize); }
     glm::vec3 voxelToWorld(const glm::ivec3& pos) const { return worldOrigin + glm::vec3(pos) * voxelSize; }
 
+    glm::ivec3 worldToChunk(glm::ivec3 pos) const {
+        return {fDivision(pos.x, CHUNK_SIZE), fDivision(pos.y, CHUNK_SIZE), fDivision(pos.z, CHUNK_SIZE)};
+    }
+    glm::ivec3 worldToLocal(glm::ivec3 pos) const {
+        glm::ivec3 chunkPos = worldToChunk(pos);
+        return pos - chunkPos * CHUNK_SIZE;
+    }
+
+    void markChunkUpdateNeeded(const glm::ivec3& chunkPos) {
+        auto it = chunks.find(chunkPos);
+        if (it != chunks.end()) it->second.markMeshUpdateNeeded();
+    }
+
+    void markNeighbourChunkUpdatedNeeded(const glm::ivec3& pos) {
+        glm::ivec3 chunkPos = worldToChunk(pos);
+        glm::ivec3 localPos = worldToLocal(pos);
+
+        markChunkUpdateNeeded(chunkPos);
+        if (localPos.x == 0) { markChunkUpdateNeeded(chunkPos + glm::ivec3(-1, 0, 0)); }
+        if (localPos.x == CHUNK_SIZE - 1) { markChunkUpdateNeeded(chunkPos + glm::ivec3( 1, 0, 0)); }
+        if (localPos.y == 0) { markChunkUpdateNeeded(chunkPos + glm::ivec3( 0,-1, 0)); }
+        if (localPos.y == CHUNK_SIZE - 1) { markChunkUpdateNeeded(chunkPos + glm::ivec3( 0, 1, 0)); }
+        if (localPos.z == 0) { markChunkUpdateNeeded(chunkPos + glm::ivec3( 0, 0,-1)); }
+        if (localPos.z == CHUNK_SIZE - 1) { markChunkUpdateNeeded(chunkPos + glm::ivec3( 0, 0, 1)); }
+    }
+
 public:
     VoxelWorld(glm::vec3 worldOrigin = glm::vec3(0.0f, 0.0f, 0.0f), float voxelSize = 1.0f) : worldOrigin(worldOrigin), voxelSize(voxelSize) {}
 
-    void addVoxel(glm::ivec3 position) { voxelSet.insert(position); }
-    void removeVoxel(glm::ivec3 position) { voxelSet.erase(position); }
-    bool checkForVoxel(glm::ivec3 position) const { return voxelSet.find(position) != voxelSet.end(); }
+    void addVoxel(glm::ivec3 pos) {
+        glm::ivec3 chunkPos = worldToChunk(pos); 
+        glm::ivec3 localPos = worldToLocal(pos);
 
-    void generateTunnelSegment(Cave& cave, const Cave::StructurePoint& start, const Cave::StructurePoint& end, float shellThickness) {
-        float radius = glm::max(start.radius, end.radius);
-        glm::vec3 paddingVec(radius + shellThickness + 1.0f);
-        
-        glm::vec3 minBounds = glm::min(start.position, end.position) - paddingVec;
-        glm::vec3 maxBounds = glm::max(start.position, end.position) + paddingVec;
+        auto it = chunks.find(chunkPos);
+        if (it == chunks.end()) { it = chunks.try_emplace(chunkPos, chunkPos).first; }
+        it->second.addVoxel(localPos);
+        markNeighbourChunkUpdatedNeeded(pos);
+    }
+    void removeVoxel(glm::ivec3 pos) {
+        glm::ivec3 chunkPos = worldToChunk(pos); 
+        glm::ivec3 localPos = worldToLocal(pos);
 
-        glm::ivec3 minVoxel = glm::ivec3(glm::floor((minBounds - worldOrigin) / voxelSize));
-        glm::ivec3 maxVoxel = glm::ivec3(glm::ceil((maxBounds - worldOrigin) / voxelSize));
+        auto it = chunks.find(chunkPos);
+        if (it == chunks.end()) { return; }
+        it->second.removeVoxel(localPos);
+        markNeighbourChunkUpdatedNeeded(pos);
+    }
+    bool checkForVoxel(glm::ivec3 pos) const {
+        glm::ivec3 chunkPos = worldToChunk(pos); 
+        glm::ivec3 localPos = worldToLocal(pos);
 
-        for (int x = minVoxel.x; x <= maxVoxel.x; ++x) {
-            for (int y = minVoxel.y; y <= maxVoxel.y; ++y) {
-                for (int z = minVoxel.z; z <= maxVoxel.z; ++z) {
-                    glm::ivec3 voxelPos(x, y, z);
-                    glm::vec3 worldPos = worldOrigin + glm::vec3(voxelPos) * voxelSize;
-                    if (cave.caveSDF(worldPos) >= 0.0f) { addVoxel(voxelPos); }
+        auto it = chunks.find(chunkPos);
+        if (it == chunks.end()) { return false; }
+        return it->second.checkForVoxel(localPos);
+    }
+
+    float getVoxelSize() const {return voxelSize; }
+    std::size_t getVoxelCount() {
+        int count = 0;
+        for (const auto& [position, chunk] : chunks) {
+            count += chunk.getLocalVoxels().size();
+        }
+        return count;
+    }
+    std::size_t getChunkCount() {return chunks.size(); }
+
+    void generateFromSDF(Cave& cave, float shellThickness=1.0f) {
+        chunks.clear();
+        const float blend = 3.0f;
+        const float margin = shellThickness + blend + 1.0f;
+
+        glm::vec3 minCorner, maxCorner;
+        cave.bounds(minCorner, maxCorner);
+
+        std::cout << "Bounds minCorner: " << minCorner.x << " " << minCorner.y << " " << minCorner.z << " maxCorner: " << maxCorner.x << " " << maxCorner.y << " " << maxCorner.z << std::endl;
+
+        glm::ivec3 minChunk = worldToChunk(glm::ivec3(glm::floor((minCorner - margin - worldOrigin) / voxelSize)));
+        glm::ivec3 maxChunk = worldToChunk(glm::ivec3(glm::ceil((maxCorner + margin - worldOrigin) / voxelSize)));
+
+        std::cout << "Chunk range: " << minChunk.x << " " << minChunk.y << " " << minChunk.z << " to " << maxChunk.x << " " << maxChunk.y << " " << maxChunk.z << std::endl;
+
+        int visited = 0, nonEmpty = 0, added = 0;
+        for (int cx = minChunk.x; cx <= maxChunk.x; ++cx) {
+            for (int cy = minChunk.y; cy <= maxChunk.y; ++cy) {
+                for (int cz = minChunk.z; cz <= maxChunk.z; ++ cz) {
+                    const glm::ivec3 center(cx, cy, cz);
+
+                    glm::vec3 centerMinCorner = worldOrigin + glm::vec3(center * CHUNK_SIZE) * voxelSize;
+                    glm::vec3 centerMaxCorner = centerMinCorner + float(CHUNK_SIZE) * voxelSize;
+                    ++visited;
+
+                    auto shape = cave.gather(centerMinCorner, centerMaxCorner, margin);
+                    if (shape.segments.empty() && shape.caverns.empty()) { continue; }
+
+                    Chunk* chunk = nullptr;
+
+                    for (int x = 0; x < CHUNK_SIZE; ++x) {
+                        for (int y = 0; y < CHUNK_SIZE; ++y) {
+                            for (int z = 0; z < CHUNK_SIZE; ++z) {
+                                glm::ivec3 local(x, y, z);
+                                glm::vec3 worldPos = worldOrigin + glm::vec3(center * CHUNK_SIZE + local) * voxelSize;
+
+                                float distance = cave.localSDF(worldPos, shape, blend);
+                                bool isWall = false;
+
+                                if (distance >= 0.0f && distance <= shellThickness + 2.0f) {
+                                    for (const auto& face : faces) {
+                                        if (cave.localSDF(worldPos + face.normal * voxelSize, shape, blend) < 0.0f) {
+                                            isWall = true;
+                                            break;
+                                        }
+                                    } 
+                                }
+                                if (isWall) {
+                                    if (!chunk) { ++nonEmpty; chunk = &chunks.try_emplace(center, center).first->second; }
+                                        chunk->addVoxel(local);
+                                        ++added;
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
-        
-    }
-    void generateCavern(Cave& cave, const Cave::Cavern& cavern, float shellThickness) {
-        glm::vec3 padding(shellThickness + 1.0f);
-
-        glm::vec3 minBounds = cavern.center - cavern.radii - padding;
-        glm::vec3 maxBounds = cavern.center + cavern.radii + padding;
-        glm::ivec3 minVoxel = glm::ivec3(glm::floor((minBounds - worldOrigin) / voxelSize));
-        glm::ivec3 maxVoxel = glm::ivec3(glm::ceil((maxBounds - worldOrigin) / voxelSize));
-
-        for (int x = minVoxel.x; x <= maxVoxel.x; ++x) {
-            for (int y = minVoxel.y; y <= maxVoxel.y; ++y) {
-                for (int z = minVoxel.z; z <= maxVoxel.z; ++z) {
-                    glm::ivec3 voxelPos(x, y, z);
-                    glm::vec3 worldPos = worldOrigin + glm::vec3(voxelPos) * voxelSize;
-                    if (cave.caveSDF(worldPos) >= 0.0f) { addVoxel(voxelPos); }
-                }
-            }
-        }
+        std::cout << visited << " chunks visited, " << nonEmpty << " with shapes, " << added << " voxels added" << std::endl;
     }
 
-    const float& getVoxelSize() const {return voxelSize; }
-    const float getVoxelSetSize() const {return voxelSet.size(); }
-    const VoxelSet& getVoxels() const { return voxelSet; }
-
-    void generateFromSDF(Cave& cave, float shellThickness=0.0f) {
-        voxelSet.clear();
-
-        const auto& path = cave.getMainPath();
-        const auto sidePaths = cave.getSidePaths();
-        const auto& caverns = cave.getCaverns();
-
-        for (size_t i = 0; i + 1 < path.size(); ++i) {
-            generateTunnelSegment(cave, path[i], path[i+1], shellThickness);
-        }
-        for (auto sidePath : sidePaths) {
-            for (size_t i = 0; i + 1 < sidePath.size(); ++i) {
-                generateTunnelSegment(cave, sidePath[i], sidePath[i+1], shellThickness);
+    void render(Shader& shader) {
+        for (auto& [position, chunk] : chunks) {
+            if (chunk.returnMeshUpdateNeeded()) {
+                chunk.generateMesh(*this);
             }
-        }
-        for (const auto& cavern : caverns) {
-            generateCavern(cave, cavern, shellThickness);
+            glm::vec3 chunkWorldPos = worldOrigin + glm::vec3(position * CHUNK_SIZE) * voxelSize;
+            glm::mat4 model = glm::translate(glm::mat4(1.0f), chunkWorldPos);
+            shader.setMat4("model", model);
+            chunk.getMesh().Draw(shader);
         }
     }
 
 };
+
+void Chunk::generateMesh(const VoxelWorld& world) {
+    std::vector<Vertex> vertices;
+    std::vector<unsigned int> indices;
+
+    for (const auto& [localPos, voxelType] : localVoxels) {
+        glm::ivec3 worldPos = chunkPosition * CHUNK_SIZE + localPos;
+        
+        for (int face = 0; face < 6; face++) {
+            unsigned int vertexStart = static_cast<unsigned int>(vertices.size());
+            if (world.checkForVoxel(worldPos + glm::ivec3(faces[face].normal))) { 
+                continue; 
+            } else {
+                for (int corner = 0; corner < 4; ++corner) {
+                    glm::vec3 pos = (glm::vec3(localPos) + faces[face].corners[corner]) * world.getVoxelSize();
+                    Vertex vertex;
+
+                    vertex.Position = pos;
+                    vertex.Color = faces[face].color;
+                    vertex.Normal = faces[face].normal;
+                    vertex.TexCoords = {(corner == 1 || corner == 2) ? 1.0f : 0.0f, (corner >= 2) ? 1.0f : 0.0f};
+                    vertices.push_back(vertex);
+                }
+                indices.push_back(vertexStart);
+                indices.push_back(vertexStart + 1);
+                indices.push_back(vertexStart + 2);
+
+                indices.push_back(vertexStart + 2);
+                indices.push_back(vertexStart + 3);
+                indices.push_back(vertexStart);
+            }
+        }
+    }
+
+    mesh.updateMesh(vertices, indices);
+    meshUpdateNeeded = false;
+}
 
 #endif

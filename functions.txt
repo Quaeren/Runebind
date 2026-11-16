@@ -1,0 +1,144 @@
+Old functions that I might still need later
+
+    void generateTunnelSegment(Cave& cave, const Cave::StructurePoint& start, const Cave::StructurePoint& end, float shellThickness) {
+        float radius = glm::max(start.radius, end.radius);
+        glm::vec3 paddingVec(radius + shellThickness + 1.0f);
+        
+        glm::vec3 minBounds = glm::min(start.position, end.position) - paddingVec;
+        glm::vec3 maxBounds = glm::max(start.position, end.position) + paddingVec;
+
+        glm::ivec3 minVoxel = glm::ivec3(glm::floor((minBounds - worldOrigin) / voxelSize));
+        glm::ivec3 maxVoxel = glm::ivec3(glm::ceil((maxBounds - worldOrigin) / voxelSize));
+
+        for (int x = minVoxel.x; x <= maxVoxel.x; ++x) {
+            for (int y = minVoxel.y; y <= maxVoxel.y; ++y) {
+                for (int z = minVoxel.z; z <= maxVoxel.z; ++z) {
+                    glm::ivec3 voxelPos(x, y, z);
+                    glm::vec3 worldPos = worldOrigin + glm::vec3(voxelPos) * voxelSize;
+                    float distance = cave.caveSDF(worldPos);
+                    if (distance >= 0.0f && distance <= shellThickness) { addVoxel(voxelPos); }
+                }
+            }
+        }
+        
+    }
+    void generateCavern(Cave& cave, const Cave::Cavern& cavern, float shellThickness) {
+        glm::vec3 padding(shellThickness + 1.0f);
+
+        glm::vec3 minBounds = cavern.center - cavern.radii - padding;
+        glm::vec3 maxBounds = cavern.center + cavern.radii + padding;
+        glm::ivec3 minVoxel = glm::ivec3(glm::floor((minBounds - worldOrigin) / voxelSize));
+        glm::ivec3 maxVoxel = glm::ivec3(glm::ceil((maxBounds - worldOrigin) / voxelSize));
+
+        for (int x = minVoxel.x; x <= maxVoxel.x; ++x) {
+            for (int y = minVoxel.y; y <= maxVoxel.y; ++y) {
+                for (int z = minVoxel.z; z <= maxVoxel.z; ++z) {
+                    glm::ivec3 voxelPos(x, y, z);
+                    glm::vec3 worldPos = worldOrigin + glm::vec3(voxelPos) * voxelSize;
+                    float distance = cave.caveSDF(worldPos);
+                    if (distance >= 0.0f && distance <= shellThickness) { addVoxel(voxelPos); }
+                }
+            }
+        }
+    }
+
+    void generateFromSDF(Cave& cave, float shellThickness=1.0f) {
+        chunks.clear();
+        
+        const auto& path = cave.getMainPath();
+        const auto& sidePaths = cave.getSidePaths();
+        const auto& caverns = cave.getCaverns();
+        const auto& largeCaverns = cave.getLargeCaverns();
+
+        for (size_t i = 0; i + 1 < path.size(); ++i) {
+            generateTunnelSegment(cave, path[i], path[i+1], shellThickness);
+        }
+        for (const auto& sidePath : sidePaths) {
+            for (size_t i = 0; i + 1 < sidePath.size(); ++i) {
+                generateTunnelSegment(cave, sidePath[i], sidePath[i+1], shellThickness);
+            }
+        }
+        for (const auto& cavern : caverns) {
+            generateCavern(cave, cavern, shellThickness);
+        }
+        for (const auto& largeCavern : largeCaverns) {
+            generateCavern(cave, largeCavern, shellThickness);
+        }
+    }
+
+
+    void addVoxelGenerated(const glm::ivec3& pos) {
+        glm::ivec3 chunkPos = worldToChunk(pos);
+        glm::ivec3 localPos = worldToLocal(pos);
+
+        auto it = chunks.find(chunkPos);
+        if (it == chunks.end()) { it = chunks.try_emplace(chunkPos, chunkPos).first; }
+        it->second.addVoxel(localPos);
+    }
+
+    void generateFromSDF(Cave& cave, float shellThickness=1.0f) {
+        chunks.clear();
+
+        std::unordered_set<glm::ivec3, IVec3Hash, IVec3Equal> candidates;
+        constexpr float blendStrength = 3.0f;
+
+        auto addBounds = [&](glm::vec3 minBounds, glm::vec3 maxBounds) {
+            glm::vec3 padding(shellThickness + blendStrength + voxelSize);
+            minBounds -= padding;
+            maxBounds += padding;
+            glm::vec3 minVoxelFloat = (minBounds - worldOrigin) / voxelSize;
+            glm::vec3 maxVoxelFloat = (maxBounds - worldOrigin) / voxelSize;
+            glm::ivec3 minVoxel = glm::ivec3(glm::floor(minVoxelFloat));
+            glm::ivec3 maxVoxel = glm::ivec3(glm::ceil(maxVoxelFloat));
+
+            for (int x = minVoxel.x; x <= maxVoxel.x; ++x) {
+                for (int y = minVoxel.y; y <= maxVoxel.y; ++y) {
+                    for (int z = minVoxel.z; z <= maxVoxel.z; ++z) {
+                        candidates.emplace(x, y, z);
+                    }
+                }
+            }
+        };
+
+        const auto& mainPath = cave.getMainPath();
+        for (size_t i = 0; i+1 < mainPath.size(); ++i) {
+            const auto& start = mainPath[i];
+            const auto& end = mainPath[i+1];
+            float radius = glm::max(start.radius, end.radius);
+            glm::vec3 padding(radius);
+
+            glm::vec3 minBounds = glm::min(start.position, end.position) - padding;
+            glm::vec3 maxBounds = glm::max(start.position, end.position) + padding;
+            addBounds(minBounds, maxBounds);
+        }
+        for (const auto& path : cave.getSidePaths()) {
+            for (size_t i = 0; i+1 < path.size(); ++i) {
+                const auto& start = path[i];
+                const auto& end = path[i+1];
+                float radius = glm::max(start.radius, end.radius);
+                glm::vec3 padding(radius);
+
+                glm::vec3 minBounds = glm::min(start.position, end.position) - padding;
+                glm::vec3 maxBounds = glm::max(start.position, end.position) + padding;
+                addBounds(minBounds, maxBounds);
+            }
+        }
+
+        for (const auto& cavern : cave.getCaverns()) {
+            addBounds(cavern.center - cavern.radii, cavern.center + cavern.radii);
+        }
+
+        for (const auto& largeCavern : cave.getLargeCaverns()) {
+            addBounds(largeCavern.center - largeCavern.radii, largeCavern.center + largeCavern.radii);
+            std::cout << "Candidate positions: " << candidates.size() << std::endl;
+
+            for(const auto& voxelPos : candidates) {
+                glm::vec3 worldPos = voxelToWorld(voxelPos);
+                float distance = cave.caveSDF(worldPos);
+                
+                if (distance >= 0.0f && distance <= shellThickness) { addVoxelGenerated(voxelPos); }
+            }
+        }
+        std::cout << "Generated Voxels: " << getVoxelCount() << std::endl;
+        std::cout << "Generated Chunks: " << getChunkCount() << std::endl;
+    }

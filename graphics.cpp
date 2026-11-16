@@ -7,20 +7,13 @@
 
 #include "shader.h"
 #include "camera.h"
-//#include "CaveGeneration.hpp"
-//#include "CaveGenerationV2.hpp"
 #include "VoxelWorld.hpp"
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
 
 #include <iostream>
-#include <cmath>
-#include <string>
-#include <vector>
-#include <algorithm>
-#include <functional>
-#include <unordered_set>
+#include <chrono>
 
 using namespace std;
 
@@ -49,174 +42,22 @@ void scroll_callback(GLFWwindow* window, double xOffset, double yOffset);
 
 unsigned int loadTexture(const char* texturePath, string fileType);
 
-struct Vertex {
-    glm::vec3 Position;
-    glm::vec3 Color;
-    glm::vec3 Normal;
-    glm::vec2 TexCoords;
-};
-
-struct Texture {
-    string location;
-    unsigned int id;
-};
-
-class Mesh {
-public:
-    vector<Vertex> vertices;
-    vector<unsigned int> indices;
-    vector<Texture> textures;
-
-    Mesh(vector<Vertex> vertices, vector<unsigned int> indices, vector<Texture> textures) {
-        this->vertices = vertices;
-        this->indices = indices;
-        this->textures = textures;
-
-        setupMesh();
-    }
-    
-    void Draw(Shader &shader) {
-        for (int i = 0; i < textures.size(); i++) {
-            glActiveTexture(GL_TEXTURE0 + i);
-            string name = "texture" + to_string(i+1);
-
-            shader.setInt(name, i);
-            glBindTexture(GL_TEXTURE_2D, textures[i].id);
-        }
-        glActiveTexture(GL_TEXTURE0);
-
-        glBindVertexArray(VAO);
-        glDrawElements(GL_TRIANGLES, indices.size(), GL_UNSIGNED_INT, 0);
-        glBindVertexArray(0);
-    }
-
-
-private:
-    unsigned int VAO, VBO, EBO;
-    
-    void setupMesh() {
-        glGenVertexArrays(1, &VAO);
-        glGenBuffers(1, &VBO);
-        glGenBuffers(1, &EBO);
-
-        glBindVertexArray(VAO);
-        glBindBuffer(GL_ARRAY_BUFFER, VBO);
-        
-        glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(Vertex), vertices.data(), GL_STATIC_DRAW);
-        
-        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
-        glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(unsigned int), indices.data(), GL_STATIC_DRAW);
-
-        glEnableVertexAttribArray(0);
-        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)0);
-
-        glEnableVertexAttribArray(1);
-        glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, Color));
-
-        glEnableVertexAttribArray(2);
-        glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, TexCoords));
-
-        glBindVertexArray(0);
-    }
-};
-
-Mesh createVoxel() {
-    vector<Vertex> vertices;
-    vector<unsigned int> indices;
-    vector<Texture> textures;
-
-    glm::vec2 texCoords[] = {
-        {0.0f, 0.0f},
-        {1.0f, 0.0f},
-        {1.0f, 1.0f},
-        {0.0f, 1.0f}
-    };
-
-    for (int face = 0; face < 6; face++) {
-        unsigned int start = vertices.size();
-
-        for (int i = 0; i < 4; i++) {
-            Vertex vertex;
-
-            vertex.Position = faces[face].corners[i];
-            vertex.Color = faces[face].color;
-            vertex.Normal = faces[face].normal;
-            vertex.TexCoords = texCoords[i];
-
-            vertices.push_back(vertex);
-        }
-
-
-        indices.push_back(start);
-        indices.push_back(start + 1);
-        indices.push_back(start + 2);
-
-        indices.push_back(start + 2);
-        indices.push_back(start + 3);
-        indices.push_back(start);
-    }
-
-    return Mesh(vertices, indices, textures);
-}
-
-Mesh GenerateMeshFromWorld(VoxelWorld world) {
-    vector<Vertex> vertices;
-    vector<unsigned int> indices;
-    vector<Texture> textures;
-
-    glm::vec2 texCoords[] = {
-        {0.0f, 0.0f},
-        {1.0f, 0.0f},
-        {1.0f, 1.0f},
-        {0.0f, 1.0f}
-    };
-
-    for (const glm::ivec3 location : world.getVoxels()) {
-        for (const VoxelFace& face : faces) {
-            unsigned int start = vertices.size();
-            glm::ivec3 neighbourLocation = location + glm::ivec3(face.normal);
-            if(world.checkForVoxel(neighbourLocation)) {
-                continue;
-            } else {
-                for (int i = 0; i < 4; i++) {
-                    Vertex vertex;
-
-                    vertex.Position = face.corners[i] * world.getVoxelSize() + glm::vec3(location);
-                    vertex.Color = face.color;
-                    vertex.Normal = face.normal;
-                    vertex.TexCoords = texCoords[i];
-
-                    vertices.push_back(vertex);
-                }
-                indices.push_back(start);
-                indices.push_back(start + 1);
-                indices.push_back(start + 2);
-
-                indices.push_back(start);
-                indices.push_back(start + 2);
-                indices.push_back(start + 3);
-            }
-        }
-    }
-    return Mesh(vertices, indices, textures);
-}
-
 int main() {
     glfwInit();
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-        
+    
+#ifdef __APPLE__
+    glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
+#endif
+
     GLFWwindow* window = glfwCreateWindow(SCR_WIDTH, SCR_HEIGHT, "Runebind", nullptr, nullptr);
     if (window == nullptr) {
         cout << "Failed to create window" << endl;
         glfwTerminate();
         return -1;
     }
-
-#ifdef __APPLE__
-    glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
-#endif
 
     glfwMakeContextCurrent(window);
     glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
@@ -231,23 +72,28 @@ int main() {
 
     glEnable(GL_DEPTH_TEST);
 
-
     // load shader and assign textures
     Shader shader("shaders/shader.vs", "shaders/shader.fs");
     shader.use();
 
-    Mesh voxel = createVoxel();
     Cave cave;
     VoxelWorld world;
+
+    auto start = chrono::high_resolution_clock::now();
+
     cave.generateWorld();
+    auto caveGenerated = chrono::high_resolution_clock::now();
+
     world.generateFromSDF(cave);
+    auto voxelsGenerated = chrono::high_resolution_clock::now();
 
+    cout << "Caverns: " << cave.getCaverns().size() << ", large: " << cave.getLargeCaverns().size() << endl;
 
-    Mesh meshWorld = GenerateMeshFromWorld(world);
+    cout << "Cave structure generation: " << chrono::duration<double>(caveGenerated - start).count() << " seconds" << endl;
+    cout << "Voxel generation: " << chrono::duration<double>(voxelsGenerated - start).count() << " seconds" << endl;
 
-    cout << "Vertex count: " << meshWorld.vertices.size() << endl;
-    cout << "Index count: " << meshWorld.indices.size() << endl;
-    cout << "Voxel count:" << world.getVoxelSetSize() << endl;
+    cout << "Voxel count:" << world.getVoxelCount() << endl;
+    cout << "Chunk count:" << world.getChunkCount() << endl;
 
     // Render loop
     while (!glfwWindowShouldClose(window)) {
@@ -265,16 +111,13 @@ int main() {
 
         shader.use();
 
-        glm::mat4 projection = glm::perspective(glm::radians(camera.Fov), (float)SCR_WIDTH / (float)SCR_HEIGHT, 0.1f, 100.0f);
+        glm::mat4 projection = glm::perspective(glm::radians(camera.Fov), (float)SCR_WIDTH / (float)SCR_HEIGHT, 0.1f, 500.0f);
         shader.setMat4("projection", projection);
 
         glm::mat4 view = camera.GetViewMatrix();
         shader.setMat4("view", view);
 
-        glm::mat4 model = glm::mat4(1.0f);
-        shader.setMat4("model", model);
-        meshWorld.Draw(shader);
-        
+        world.render(shader);
 
         // Check and call events then swap buffers
         glfwSwapBuffers(window);
@@ -321,7 +164,6 @@ void mouse_callback(GLFWwindow* window, double xPos, double yPos) {
         firstMouse = false;
     }
     
-
     float xOffset = xPos - lastX;
     float yOffset = lastY - yPos;
     lastX = xPos;
