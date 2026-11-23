@@ -76,7 +76,7 @@ public:
         glAttachShader(ID, fragment);
         glLinkProgram(ID);
         
-        glGetProgramiv(ID, GL_COMPILE_STATUS, &succes);
+        glGetProgramiv(ID, GL_LINK_STATUS, &succes);
         if (!succes) {
             glGetProgramInfoLog(ID, 512, nullptr, infoLog);
             std::cout << "ERROR::SHADER::PROGRAM::LINKING_FAILED\n" << infoLog  << std::endl;

@@ -22,5 +22,15 @@ This generation I am momentarily building and testing makes a long corridor whic
    g++ -g -std=c++17 graphics.cpp -o graphics -lGLEW -lglfw -lGL -O2
    ./graphics
    ```
+Voxel generation can take upwards of 1 minute or 2 so don't be surprised if nothing shows up at first. If it takes longer then 5 minutes then something is broken somewhere.
+After building you are dropped into the cave world as a block, the controls are as follows:
+Forward: 'W'
+Backward: 'S'
+Left: 'A'
+Right: 'D'
+Jump: 'SPACE'
+Change POV: 'V'
+Look Around: mouse
+change fov/distance from player: scroll wheel
 ## Further Development
 After I finish the cave system I am going to work on getting a player and enemy system up and running. Once that works I'll start work on the main part of the game - the spell crafting. Players should be able to find runes throughout the ruins. Using these runes they can make different combinations and thus different spells.
